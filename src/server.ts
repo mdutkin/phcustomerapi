@@ -3,6 +3,7 @@
 import { buildApp } from "./app";
 import { env } from "@/config/env";
 import { pool } from "@/db/client";
+import { closeMssqlPools } from "@/db/mssql";
 
 async function main() {
   const app = await buildApp();
@@ -11,7 +12,7 @@ async function main() {
     app.log.info({ signal }, "shutdown initiated");
     try {
       await app.close();
-      await pool.end();
+      await Promise.allSettled([pool.end(), closeMssqlPools()]);
       process.exit(0);
     } catch (err) {
       app.log.error({ err }, "shutdown error");

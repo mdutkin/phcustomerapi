@@ -10,6 +10,7 @@ import swagger from "@fastify/swagger";
 import swaggerUi from "@fastify/swagger-ui";
 import { jsonSchemaTransform, serializerCompiler, validatorCompiler } from "fastify-type-provider-zod";
 import { env, isProd } from "@/config/env";
+import { pingMssql } from "@/db/mssql";
 import authPlugin from "@/plugins/auth";
 import errorHandler from "@/plugins/error-handler";
 import { authRoutes } from "@/modules/auth/auth.routes";
@@ -69,7 +70,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   });
   await app.register(swaggerUi, { routePrefix: "/docs" });
 
-  // Health check — no auth, no rate limit, used by load balancers.
+  // Liveness — no auth, no rate limit, used by load balancers.
   app.get("/health", { config: { rateLimit: false } }, async () => ({
     ok: true,
     service: "phcustomerapi",
@@ -77,6 +78,21 @@ export async function buildApp(): Promise<FastifyInstance> {
     env: env.NODE_ENV,
     time: new Date().toISOString(),
   }));
+
+  // Deep health — exercises both MSSQL pools. Use sparingly (not for LB
+  // probes — pings real DBs). Returns 200 with status payload either way.
+  app.get("/health/deep", { config: { rateLimit: false } }, async () => {
+    const mssqlStatus = await pingMssql();
+    const ok = mssqlStatus.pharmSql.ok && mssqlStatus.pharmSqlConventional.ok;
+    return {
+      ok,
+      service: "phcustomerapi",
+      version: "0.1.0",
+      env: env.NODE_ENV,
+      mssql: mssqlStatus,
+      time: new Date().toISOString(),
+    };
+  });
 
   await app.register(authRoutes);
   await app.register(patientRoutes);

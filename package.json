@@ -21,7 +21,10 @@
     "db:migrate": "tsx src/db/migrate.ts",
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio",
-    "db:seed": "tsx src/db/seed.ts"
+    "db:seed": "tsx src/db/seed.ts",
+    "check:mssql": "tsx scripts/check-mssql.ts",
+    "check:health": "tsx scripts/probe-deep-health.ts",
+    "tunnel:mssql": "ssh -NT -L 1433:192.168.0.107:1433 -o ServerAliveInterval=60 -o ServerAliveCountMax=3 -o ExitOnForwardFailure=yes pha-old"
   },
   "dependencies": {
     "@fastify/cors": "^10.0.1",
@@ -37,6 +40,7 @@
     "drizzle-zod": "^0.5.1",
     "fastify": "^5.1.0",
     "fastify-type-provider-zod": "^4.0.2",
+    "mssql": "^12.5.2",
     "nanoid": "^5.0.8",
     "pg": "^8.13.1",
     "pino": "^9.5.0",
@@ -44,6 +48,7 @@
     "zod": "^3.23.8"
   },
   "devDependencies": {
+    "@types/mssql": "^12.3.0",
     "@types/node": "^22.9.0",
     "@types/pg": "^8.11.10",
     "@typescript-eslint/eslint-plugin": "^8.13.0",
