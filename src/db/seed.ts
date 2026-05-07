@@ -1,26 +1,24 @@
-// Seed the local DB with the same demo persona the portal already uses.
-// Run with: npm run db:seed (after `npm run db:push`).
+// Seeds the local PG database with a demo portal user and a small set
+// of OTC products. Clinical data (prescriptions, drugs, prescribers,
+// patient demographics, insurance) is NOT seeded — it lives in the
+// PrimeRX MSSQL databases. To exercise the full /me + /prescriptions
+// flow against real data, run:
+//
+//   1. Open the MSSQL tunnel:  npm run tunnel:mssql
+//   2. Seed PG:                npm run db:seed
+//   3. Sign in via OTP/email and call POST /me/claim with real
+//      lastName + dob + phone of an existing PrimeRX patient.
+//
+// Lab results stay seeded as a STUB until NextGen integration lands.
 
 import { db, pool } from "./client";
-import {
-  patients,
-  prescribers,
-  pharmacies,
-  prescriptions,
-  drugs,
-  labResults,
-  otcProducts,
-  insurancePlans,
-  addresses,
-  users,
-} from "./schema";
+import { labResults, otcProducts, users } from "./schema";
 import { hashPassword } from "@/lib/crypto";
 
 async function main() {
   // eslint-disable-next-line no-console
   console.log("Seeding database…");
 
-  // ─── User + Patient ────────────────────────────────────────────────────
   const [user] = await db
     .insert(users)
     .values({
@@ -31,94 +29,7 @@ async function main() {
     .returning();
   if (!user) throw new Error("user seed failed");
 
-  const [patel] = await db
-    .insert(prescribers)
-    .values({
-      name: "Dr. Rohan Patel, MD",
-      specialty: "Internal Medicine",
-      clinic: "Bay Family Health, San Francisco",
-      phone: "+14155550119",
-    })
-    .returning();
-  if (!patel) throw new Error("prescriber seed failed");
-
-  const [maple] = await db
-    .insert(pharmacies)
-    .values({
-      name: "Maple St. Pharmacy",
-      address: "240 Maple St, San Francisco, CA 94109",
-      phone: "+14155550140",
-    })
-    .returning();
-  if (!maple) throw new Error("pharmacy seed failed");
-
-  const [patient] = await db
-    .insert(patients)
-    .values({
-      userId: user.id,
-      firstName: "Margaret",
-      lastName: "Chen",
-      dob: "1953-03-14",
-      phoneE164: "+14155550192",
-      email: "margaret.chen@example.com",
-      preferredPharmacyId: maple.id,
-      primaryPrescriberId: patel.id,
-      allergies: ["Penicillin", "Sulfa drugs"],
-      conditions: ["High cholesterol", "Hypertension", "Type 2 diabetes"],
-    })
-    .returning();
-  if (!patient) throw new Error("patient seed failed");
-
-  await db.insert(addresses).values({
-    patientId: patient.id,
-    label: "Home",
-    line1: "1428 Sutter St, Apt 4B",
-    city: "San Francisco",
-    state: "CA",
-    postalCode: "94109",
-    isDefault: "true",
-  });
-
-  await db.insert(insurancePlans).values({
-    patientId: patient.id,
-    plan: "Blue Shield PPO",
-    memberId: "BSC-42-9173-08",
-    groupId: "GRP-118840",
-    effectiveFrom: "2026-01-01",
-    effectiveTo: "2026-12-31",
-  });
-
-  // ─── Drugs + Prescriptions ─────────────────────────────────────────────
-  const [atorva] = await db
-    .insert(drugs)
-    .values({
-      name: "Atorvastatin",
-      genericName: "atorvastatin calcium",
-      form: "tablet",
-      strength: "20 mg",
-      uses: "Lowers LDL cholesterol",
-    })
-    .returning();
-  if (!atorva) throw new Error("drug seed failed");
-
-  await db.insert(prescriptions).values({
-    patientId: patient.id,
-    drugId: atorva.id,
-    prescriberId: patel.id,
-    rxNumber: "RX48119",
-    sig: "Take 1 tablet by mouth once daily at bedtime",
-    qtyPerFill: 30,
-    daysSupply: 30,
-    refillsTotal: 5,
-    refillsRemaining: 3,
-    purpose: "Lowers LDL cholesterol",
-    status: "refill_available",
-    pricePerFill: "8.40",
-    lastFilledAt: "2026-04-09",
-    nextRefillAt: "2026-05-09",
-  });
-
-  // ─── Lab results ───────────────────────────────────────────────────────
+  // ─── Lab results (STUB until NextGen API integration) ──────────────────
   const labRows = [
     { code: "TCHOL", name: "Total cholesterol", cat: "Lipid panel", value: "215", unit: "mg/dL", flag: "H" as const, refLow: "0", refHigh: "200" },
     { code: "HDL", name: "HDL cholesterol", cat: "Lipid panel", value: "58", unit: "mg/dL", flag: "OK" as const, refLow: "40", refHigh: null },
@@ -127,11 +38,11 @@ async function main() {
   ];
   for (const lab of labRows) {
     await db.insert(labResults).values({
-      patientId: patient.id,
+      userId: user.id,
       testCode: lab.code,
       testName: lab.name,
       category: lab.cat,
-      source: "Quest Diagnostics",
+      source: "Quest Diagnostics (stub)",
       collectedAt: new Date("2026-04-24T08:30:00Z"),
       value: lab.value,
       unit: lab.unit,
@@ -150,7 +61,9 @@ async function main() {
   ]);
 
   // eslint-disable-next-line no-console
-  console.log("Seed complete.");
+  console.log("Seed complete. Demo user:", user.email);
+  // eslint-disable-next-line no-console
+  console.log("Next: claim a real PrimeRX patient via POST /me/claim.");
   await pool.end();
 }
 

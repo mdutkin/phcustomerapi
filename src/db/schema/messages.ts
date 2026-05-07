@@ -1,4 +1,4 @@
-// Messaging — pharmacy/doctor/support threads.
+// Messaging — pharmacy/doctor/support threads owned by a portal user.
 
 import {
   pgTable,
@@ -10,7 +10,7 @@ import {
   index,
   boolean,
 } from "drizzle-orm/pg-core";
-import { patients } from "./patients";
+import { users } from "./auth";
 
 export const senderRoleEnum = pgEnum("sender_role", ["patient", "pharm", "doc", "support", "system"]);
 
@@ -18,16 +18,16 @@ export const threads = pgTable(
   "threads",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    patientId: uuid("patient_id")
+    userId: uuid("user_id")
       .notNull()
-      .references(() => patients.id, { onDelete: "cascade" }),
+      .references(() => users.id, { onDelete: "cascade" }),
     counterpartName: varchar("counterpart_name", { length: 160 }).notNull(),
     counterpartRole: senderRoleEnum("counterpart_role").notNull(),
     lastMessageAt: timestamp("last_message_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
-    patientIdx: index("threads_patient_idx").on(t.patientId),
+    userIdx: index("threads_user_idx").on(t.userId),
   }),
 );
 

@@ -1,4 +1,10 @@
-// Lab results and trends.
+// Lab results — STUB until NextGen integration lands.
+//
+// Per Max (2026-05-07): "Labs data will be coming over API from NextGen —
+// we need to stab the data for now." So we keep a simple PG table with
+// the dimensions we expect to surface in the UI (value, flag, ref range,
+// trend over time). Once the NextGen API is wired up, this becomes a
+// read-through cache or is replaced by a live MSSQL-style read model.
 
 import {
   pgTable,
@@ -10,7 +16,7 @@ import {
   pgEnum,
   index,
 } from "drizzle-orm/pg-core";
-import { patients } from "./patients";
+import { users } from "./auth";
 
 export const labFlagEnum = pgEnum("lab_flag", ["OK", "H", "L", "CRIT_H", "CRIT_L"]);
 
@@ -18,9 +24,9 @@ export const labResults = pgTable(
   "lab_results",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    patientId: uuid("patient_id")
+    userId: uuid("user_id")
       .notNull()
-      .references(() => patients.id, { onDelete: "cascade" }),
+      .references(() => users.id, { onDelete: "cascade" }),
     testCode: varchar("test_code", { length: 32 }).notNull(),
     testName: varchar("test_name", { length: 160 }).notNull(),
     category: varchar("category", { length: 80 }),
@@ -36,7 +42,7 @@ export const labResults = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
-    patientIdx: index("lab_patient_idx").on(t.patientId),
+    userIdx: index("lab_user_idx").on(t.userId),
     codeIdx: index("lab_code_idx").on(t.testCode),
     collectedIdx: index("lab_collected_idx").on(t.collectedAt),
   }),

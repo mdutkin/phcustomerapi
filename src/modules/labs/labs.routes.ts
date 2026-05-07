@@ -1,10 +1,13 @@
 // Lab results — list + detail (with history series).
+//
+// Currently reads from PG (stub data). NextGen API integration will
+// replace the data source here later.
 
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
 import { z } from "zod";
 import { and, asc, desc, eq } from "drizzle-orm";
 import { db } from "@/db/client";
-import { labResults, patients } from "@/db/schema";
+import { labResults } from "@/db/schema";
 import { recordAudit } from "@/lib/audit";
 import { HttpError } from "@/plugins/error-handler";
 
@@ -24,16 +27,6 @@ const LabRow = z.object({
   note: z.string().nullable(),
 });
 
-async function patientIdForUser(userId: string): Promise<string> {
-  const [row] = await db
-    .select({ id: patients.id })
-    .from(patients)
-    .where(eq(patients.userId, userId))
-    .limit(1);
-  if (!row) throw new HttpError(404, "patient_not_found");
-  return row.id;
-}
-
 export const labRoutes: FastifyPluginAsyncZod = async (app) => {
   app.get("/labs", {
     onRequest: [app.authenticate],
@@ -43,18 +36,18 @@ export const labRoutes: FastifyPluginAsyncZod = async (app) => {
       response: { 200: z.object({ items: z.array(LabRow) }) },
     },
   }, async (req) => {
-    const patientId = await patientIdForUser(req.user.sub);
+    const userId = req.user.sub;
 
     const rows = await db
       .select()
       .from(labResults)
-      .where(eq(labResults.patientId, patientId))
+      .where(eq(labResults.userId, userId))
       .orderBy(desc(labResults.collectedAt));
 
     await recordAudit(req, {
       action: "labs.list",
       resourceType: "lab_result",
-      patientId,
+      subjectUserId: userId,
       metadata: { count: rows.length },
     });
 
@@ -96,13 +89,13 @@ export const labRoutes: FastifyPluginAsyncZod = async (app) => {
       },
     },
   }, async (req) => {
-    const patientId = await patientIdForUser(req.user.sub);
+    const userId = req.user.sub;
     const { id } = req.params;
 
     const [result] = await db
       .select()
       .from(labResults)
-      .where(and(eq(labResults.id, id), eq(labResults.patientId, patientId)))
+      .where(and(eq(labResults.id, id), eq(labResults.userId, userId)))
       .limit(1);
     if (!result) throw new HttpError(404, "lab_result_not_found");
 
@@ -113,14 +106,14 @@ export const labRoutes: FastifyPluginAsyncZod = async (app) => {
         flag: labResults.flag,
       })
       .from(labResults)
-      .where(and(eq(labResults.patientId, patientId), eq(labResults.testCode, result.testCode)))
+      .where(and(eq(labResults.userId, userId), eq(labResults.testCode, result.testCode)))
       .orderBy(asc(labResults.collectedAt));
 
     await recordAudit(req, {
       action: "lab_result.read",
       resourceType: "lab_result",
       resourceId: id,
-      patientId,
+      subjectUserId: userId,
     });
 
     return {

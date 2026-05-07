@@ -8,8 +8,9 @@ import jwtPlugin, { type FastifyJWT } from "@fastify/jwt";
 import { env } from "@/config/env";
 
 export interface AccessTokenPayload {
-  sub: string;          // user id
-  patientId?: string;   // patient id (if linked)
+  sub: string;          // portal user id
+  // Patient linkage is fetched per-request from PG (`user_patients`),
+  // not encoded in the token. Keeps tokens stable as links change.
   type: "access";
 }
 export interface RefreshTokenPayload {

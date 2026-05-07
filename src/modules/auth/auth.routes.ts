@@ -16,7 +16,7 @@ const RefreshBody = z.object({ refreshToken: z.string().min(20) });
 const SessionResponse = z.object({
   accessToken: z.string(),
   refreshToken: z.string(),
-  user: z.object({ id: z.string().uuid(), patientId: z.string().uuid().optional() }),
+  user: z.object({ id: z.string().uuid() }),
 });
 
 export const authRoutes: FastifyPluginAsyncZod = async (app) => {

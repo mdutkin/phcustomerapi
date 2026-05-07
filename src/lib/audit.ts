@@ -10,7 +10,12 @@ export interface AuditEvent {
   action: string;
   resourceType: string;
   resourceId?: string;
-  patientId?: string;
+  /**
+   * Portal user the action concerned (subject of the action). For
+   * actions that touch a PrimeRX patient, also stash
+   * `{ dbKind, patientno }` in `metadata`.
+   */
+  subjectUserId?: string;
   actorUserId?: string;
   actorIp?: string;
   metadata?: Record<string, unknown>;
@@ -25,7 +30,7 @@ export async function recordAudit(req: FastifyRequest | null, event: AuditEvent)
       action: event.action,
       resourceType: event.resourceType,
       resourceId: event.resourceId,
-      patientId: event.patientId,
+      subjectUserId: event.subjectUserId,
       actorUserId,
       actorIp,
       metadata: event.metadata,

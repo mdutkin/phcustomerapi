@@ -1,4 +1,9 @@
-// Orders, deliveries, billing.
+// Orders, deliveries, billing, payments.
+//
+// All references point at `users.id` (PG), not at any clinical patient
+// identity. The MSSQL-side patient identity is reachable via
+// `user_patients` if a pharmacist needs to reconcile billing across
+// systems — but for the portal flows here, the user is the actor.
 
 import {
   pgTable,
@@ -12,8 +17,9 @@ import {
   index,
   jsonb,
 } from "drizzle-orm/pg-core";
-import { patients } from "./patients";
+import { users } from "./auth";
 import { otcProducts } from "./shop";
+import { dbKindEnum } from "./links";
 
 export const orderStatusEnum = pgEnum("order_status", [
   "pending",
@@ -30,9 +36,9 @@ export const orders = pgTable(
   "orders",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    patientId: uuid("patient_id")
+    userId: uuid("user_id")
       .notNull()
-      .references(() => patients.id, { onDelete: "restrict" }),
+      .references(() => users.id, { onDelete: "restrict" }),
     orderNumber: varchar("order_number", { length: 24 }).notNull().unique(),
     status: orderStatusEnum("status").notNull().default("pending"),
     subtotal: numeric("subtotal", { precision: 10, scale: 2 }).notNull(),
@@ -50,7 +56,7 @@ export const orders = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
-    patientIdx: index("orders_patient_idx").on(t.patientId),
+    userIdx: index("orders_user_idx").on(t.userId),
     statusIdx: index("orders_status_idx").on(t.status),
   }),
 );
@@ -74,6 +80,8 @@ export const orderItems = pgTable(
 );
 
 // Includes both shop-order deliveries and Rx fulfillment deliveries.
+// For Rx, `rxDbKind` + `rxno` (+ optional `refillNo`) point at the MSSQL
+// CLAIMS row. For OTC, `orderId` points at the PG order.
 export const deliveryStatusEnum = pgEnum("delivery_status", [
   "scheduled",
   "preparing",
@@ -87,11 +95,13 @@ export const deliveries = pgTable(
   "deliveries",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    patientId: uuid("patient_id")
+    userId: uuid("user_id")
       .notNull()
-      .references(() => patients.id, { onDelete: "cascade" }),
+      .references(() => users.id, { onDelete: "cascade" }),
     orderId: uuid("order_id").references(() => orders.id, { onDelete: "set null" }),
-    prescriptionId: uuid("prescription_id"),
+    rxDbKind: dbKindEnum("rx_db_kind"),
+    rxno: varchar("rxno", { length: 32 }),
+    refillNo: integer("refill_no"),
     scheduledFor: timestamp("scheduled_for", { withTimezone: true }).notNull(),
     timeWindow: varchar("time_window", { length: 32 }),
     status: deliveryStatusEnum("status").notNull().default("scheduled"),
@@ -101,13 +111,16 @@ export const deliveries = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
-    patientIdx: index("deliveries_patient_idx").on(t.patientId),
+    userIdx: index("deliveries_user_idx").on(t.userId),
     scheduledIdx: index("deliveries_scheduled_idx").on(t.scheduledFor),
+    rxIdx: index("deliveries_rx_idx").on(t.rxDbKind, t.rxno),
   }),
 );
 
 // Billing — separate from shop orders because it includes office copays,
-// lab fees, prescription costs, etc.
+// lab fees, prescription costs, etc. Source-of-truth for Rx billing
+// stays in PrimeRX (CLAIMS); these invoices represent portal-visible
+// outstanding balances.
 export const billingStatusEnum = pgEnum("billing_status", [
   "outstanding",
   "paid",
@@ -119,9 +132,9 @@ export const invoices = pgTable(
   "invoices",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    patientId: uuid("patient_id")
+    userId: uuid("user_id")
       .notNull()
-      .references(() => patients.id, { onDelete: "cascade" }),
+      .references(() => users.id, { onDelete: "cascade" }),
     invoiceNumber: varchar("invoice_number", { length: 24 }).notNull().unique(),
     description: text("description").notNull(),
     amount: numeric("amount", { precision: 10, scale: 2 }).notNull(),
@@ -132,7 +145,7 @@ export const invoices = pgTable(
     paidAt: timestamp("paid_at", { withTimezone: true }),
   },
   (t) => ({
-    patientIdx: index("invoices_patient_idx").on(t.patientId),
+    userIdx: index("invoices_user_idx").on(t.userId),
     statusIdx: index("invoices_status_idx").on(t.status),
   }),
 );
@@ -141,9 +154,9 @@ export const payments = pgTable(
   "payments",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    patientId: uuid("patient_id")
+    userId: uuid("user_id")
       .notNull()
-      .references(() => patients.id, { onDelete: "restrict" }),
+      .references(() => users.id, { onDelete: "restrict" }),
     invoiceId: uuid("invoice_id").references(() => invoices.id, { onDelete: "set null" }),
     amount: numeric("amount", { precision: 10, scale: 2 }).notNull(),
     method: varchar("method", { length: 32 }).notNull(),
@@ -152,7 +165,7 @@ export const payments = pgTable(
     paidAt: timestamp("paid_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
-    patientIdx: index("payments_patient_idx").on(t.patientId),
+    userIdx: index("payments_user_idx").on(t.userId),
   }),
 );
 
@@ -160,9 +173,9 @@ export const paymentMethods = pgTable(
   "payment_methods",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    patientId: uuid("patient_id")
+    userId: uuid("user_id")
       .notNull()
-      .references(() => patients.id, { onDelete: "cascade" }),
+      .references(() => users.id, { onDelete: "cascade" }),
     brand: varchar("brand", { length: 24 }).notNull(),
     last4: varchar("last4", { length: 4 }).notNull(),
     expMonth: integer("exp_month").notNull(),
@@ -172,6 +185,6 @@ export const paymentMethods = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
-    patientIdx: index("pm_patient_idx").on(t.patientId),
+    userIdx: index("pm_user_idx").on(t.userId),
   }),
 );

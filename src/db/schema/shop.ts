@@ -1,4 +1,5 @@
-// OTC products and shopping cart.
+// OTC products and shopping cart. Cart belongs to a portal user, not a
+// clinical patient.
 
 import {
   pgTable,
@@ -11,7 +12,7 @@ import {
   boolean,
   index,
 } from "drizzle-orm/pg-core";
-import { patients } from "./patients";
+import { users } from "./auth";
 
 export const otcProducts = pgTable(
   "otc_products",
@@ -35,14 +36,14 @@ export const otcProducts = pgTable(
   }),
 );
 
-// Live cart per patient. Stale carts cleaned up periodically.
+// Live cart per user. Stale carts cleaned up periodically.
 export const carts = pgTable(
   "carts",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    patientId: uuid("patient_id")
+    userId: uuid("user_id")
       .notNull()
-      .references(() => patients.id, { onDelete: "cascade" })
+      .references(() => users.id, { onDelete: "cascade" })
       .unique(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),

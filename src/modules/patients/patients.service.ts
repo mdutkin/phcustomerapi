@@ -1,36 +1,134 @@
-// Patient lookups. The current /me endpoint returns the patient bound to the
-// authenticated user; later flows will let an authenticated parent or
-// guardian access dependents.
+// Patient lookups. The /me endpoint merges:
+//   - portal user data (PG)
+//   - the user's primary PrimeRX patient record (MSSQL)
+//   - portal-side extra addresses (PG)
+//
+// If the user is not yet linked to a PrimeRX patient, /me still returns
+// the user data — the UI then prompts for self-claim.
 
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "@/db/client";
-import { addresses, insurancePlans, patients, prescribers, pharmacies } from "@/db/schema";
+import { addresses, userPatients, users } from "@/db/schema";
+import { getPatient } from "@/db/mssql-models";
+import type { DbKind, PrimeRxPatient } from "@/db/mssql-models";
 import { HttpError } from "@/plugins/error-handler";
 
-export async function getPatientForUser(userId: string) {
-  const [patient] = await db
-    .select()
-    .from(patients)
-    .where(eq(patients.userId, userId))
-    .limit(1);
-  if (!patient) throw new HttpError(404, "patient_not_found", "No patient is linked to this account.");
+export interface MeResult {
+  user: {
+    id: string;
+    email: string | null;
+    phoneE164: string | null;
+    createdAt: Date;
+  };
+  link:
+    | {
+        dbKind: DbKind;
+        patientno: number;
+        isPrimary: boolean;
+      }
+    | null;
+  patient: PrimeRxPatient | null;
+  addresses: Array<{
+    id: string;
+    label: string;
+    line1: string;
+    line2: string | null;
+    city: string;
+    state: string;
+    postalCode: string;
+    isDefault: boolean;
+  }>;
+}
 
-  const [insurance] = patient.id
-    ? await db.select().from(insurancePlans).where(eq(insurancePlans.patientId, patient.id)).limit(1)
-    : [];
+export async function getMeForUser(userId: string): Promise<MeResult> {
+  const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+  if (!user) throw new HttpError(404, "user_not_found");
+
+  // Pick the primary link, or any link if no primary flag is set.
+  const links = await db
+    .select()
+    .from(userPatients)
+    .where(eq(userPatients.userId, userId))
+    .orderBy(userPatients.isPrimary);
+  const primary = links.find((l) => l.isPrimary) ?? links[0] ?? null;
+
+  let patient: PrimeRxPatient | null = null;
+  if (primary) {
+    patient = await getPatient(primary.dbKind, primary.patientno);
+  }
 
   const addressRows = await db
     .select()
     .from(addresses)
-    .where(eq(addresses.patientId, patient.id));
+    .where(eq(addresses.userId, userId));
 
-  const [primaryPrescriber] = patient.primaryPrescriberId
-    ? await db.select().from(prescribers).where(eq(prescribers.id, patient.primaryPrescriberId)).limit(1)
-    : [];
+  return {
+    user: {
+      id: user.id,
+      email: user.email,
+      phoneE164: user.phoneE164,
+      createdAt: user.createdAt,
+    },
+    link: primary
+      ? { dbKind: primary.dbKind, patientno: primary.patientno, isPrimary: primary.isPrimary }
+      : null,
+    patient,
+    addresses: addressRows.map((a) => ({
+      id: a.id,
+      label: a.label,
+      line1: a.line1,
+      line2: a.line2,
+      city: a.city,
+      state: a.state,
+      postalCode: a.postalCode,
+      isDefault: a.isDefault,
+    })),
+  };
+}
 
-  const [preferredPharmacy] = patient.preferredPharmacyId
-    ? await db.select().from(pharmacies).where(eq(pharmacies.id, patient.preferredPharmacyId)).limit(1)
-    : [];
+/**
+ * Resolve the primary PrimeRX link for a user. Throws 409 if the user
+ * has not yet claimed a patient record. Used by Rx, deliveries, and
+ * billing endpoints that need a patient identity.
+ */
+export async function requirePatientLink(userId: string): Promise<{
+  dbKind: DbKind;
+  patientno: number;
+}> {
+  const links = await db
+    .select()
+    .from(userPatients)
+    .where(eq(userPatients.userId, userId));
+  const primary = links.find((l) => l.isPrimary) ?? links[0];
+  if (!primary) {
+    throw new HttpError(
+      409,
+      "patient_not_linked",
+      "This account is not yet linked to a patient record. Run the self-claim flow.",
+    );
+  }
+  return { dbKind: primary.dbKind, patientno: primary.patientno };
+}
 
-  return { patient, insurance, addresses: addressRows, primaryPrescriber, preferredPharmacy };
+/**
+ * Helper for routes that must verify the (dbKind, patientno) pair
+ * belongs to the logged-in user. Throws 403 if not.
+ */
+export async function assertUserOwnsPatient(
+  userId: string,
+  dbKind: DbKind,
+  patientno: number,
+): Promise<void> {
+  const [link] = await db
+    .select({ id: userPatients.id })
+    .from(userPatients)
+    .where(
+      and(
+        eq(userPatients.userId, userId),
+        eq(userPatients.dbKind, dbKind),
+        eq(userPatients.patientno, patientno),
+      ),
+    )
+    .limit(1);
+  if (!link) throw new HttpError(403, "patient_link_not_owned");
 }
