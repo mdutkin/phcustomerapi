@@ -69,13 +69,15 @@ const EnvSchema = z.object({
   MSSQL_POOL_MAX: z.coerce.number().int().positive().default(10),
   MSSQL_REQUEST_TIMEOUT_MS: z.coerce.number().int().positive().default(15000),
 
-  JWT_SECRET: z.string().min(32, "JWT_SECRET must be at least 32 chars"),
-  JWT_ISSUER: z.string().default("phcustomerapi"),
-  JWT_ACCESS_TTL: z.string().default("15m"),
-  JWT_REFRESH_TTL: z.string().default("30d"),
-
-  OTP_TTL_SECONDS: z.coerce.number().int().positive().default(300),
-  OTP_DEV_CODE: z.string().optional(),
+  // ─── Firebase Authentication (sole source of truth for auth) ───
+  // FIREBASE_PROJECT_ID: the portal's own Firebase project (NOT phanalytics').
+  // FIREBASE_SERVICE_ACCOUNT_JSON: admin SDK credential (JSON string) for prod.
+  //   Optional when using the Auth emulator — set FIREBASE_AUTH_EMULATOR_HOST
+  //   (read directly by firebase-admin) and the SDK skips real credentials.
+  FIREBASE_PROJECT_ID: z.string().min(1),
+  FIREBASE_SERVICE_ACCOUNT_JSON: z.string().optional(),
+  // Standard firebase-admin env var; presence routes the SDK at the emulator.
+  FIREBASE_AUTH_EMULATOR_HOST: z.string().optional(),
 
   CORS_ORIGINS: z
     .string()
@@ -107,9 +109,10 @@ export const isProd = env.NODE_ENV === "production";
 export const isDev = env.NODE_ENV === "development";
 export const isTest = env.NODE_ENV === "test";
 
-// Hard fail if prod is starting with the example placeholder secret.
-if (isProd && env.JWT_SECRET.includes("replace_me")) {
+// Hard fail if prod is starting without real Firebase credentials (the emulator
+// must never be used in production).
+if (isProd && (!env.FIREBASE_SERVICE_ACCOUNT_JSON || env.FIREBASE_AUTH_EMULATOR_HOST)) {
   // eslint-disable-next-line no-console
-  console.error("❌ Refusing to start production with placeholder JWT_SECRET");
+  console.error("❌ Refusing to start production without FIREBASE_SERVICE_ACCOUNT_JSON / with the auth emulator");
   process.exit(1);
 }

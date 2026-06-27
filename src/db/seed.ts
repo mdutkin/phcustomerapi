@@ -13,18 +13,20 @@
 
 import { db, pool } from "./client";
 import { labResults, otcProducts, users } from "./schema";
-import { hashPassword } from "@/lib/crypto";
 
 async function main() {
   // eslint-disable-next-line no-console
   console.log("Seeding database…");
 
+  // Auth is owned by Firebase. To exercise this seed user end-to-end, create a
+  // matching user in the Firebase Auth emulator with this UID, or just use it
+  // as a fixture for the OTC/lab data below.
   const [user] = await db
     .insert(users)
     .values({
+      firebaseUid: "dev-seed-margaret-chen",
       email: "margaret.chen@example.com",
       phoneE164: "+14155550192",
-      passwordHash: await hashPassword("changeme123"),
     })
     .returning();
   if (!user) throw new Error("user seed failed");

@@ -49,16 +49,25 @@ Client ──HTTPS──▶ LB ──HTTP──▶ Fastify ──▶ Service ─
 
 ## Auth model
 
-| Token   | Lifetime | Storage    | Rotates? | Revokable? |
-|---------|----------|------------|----------|------------|
-| Access  | 15m      | client RAM | no       | only by expiry |
-| Refresh | 30d      | hashed in `refresh_tokens` | on every use | yes (set `revoked_at`) |
+**Firebase Authentication is the sole source of truth** (phone sign-in for v1).
+We do NOT store passwords, OTP challenges, or refresh tokens — Firebase owns the
+SMS code, the session, and token refresh. The previous home-grown JWT+OTP+refresh
+system was removed (see `portal-auth-and-deploy.md`).
 
-Refresh tokens are random 48-byte URL-safe strings, **not JWTs**. Storing
-them as SHA-256 hashes means a DB leak doesn't compromise live sessions.
+Flow: the frontend signs the user in with Firebase (phone + SMS) and gets a
+Firebase **ID token**. Every API call sends it as `Authorization: Bearer <token>`.
+The `authenticate` plugin (`plugins/auth.ts`) verifies the token with
+`firebase-admin`, then **lazily provisions** a local `users` row keyed by the
+Firebase UID. Downstream route modules keep using `req.user.sub` (the internal
+`users.id`) — that contract didn't change when we swapped the auth backend.
 
-OTP codes are hashed with SHA-256, attempt-counted (max 5), and TTL'd at
-`OTP_TTL_SECONDS` (default 5 min).
+- `users.firebase_uid` (unique) is the identity key; `phone_e164` / `email` are
+  mirrored from the verified token for lookup/convenience.
+- Dev/test verify tokens against the **Firebase Auth emulator**
+  (`FIREBASE_AUTH_EMULATOR_HOST`); prod uses a service-account credential
+  (`FIREBASE_SERVICE_ACCOUNT_JSON`, kept out of git).
+- Patient linkage (PrimeRX/NextGen) is a **separate** post-auth flow — a
+  Firebase-authenticated user is not yet linked to any patient record.
 
 ## Audit semantics
 
@@ -74,8 +83,8 @@ cold storage rather than `DELETE`.
 - **Pharmacy / fulfillment integrations** — out of customer-facing scope.
   When a refill is requested, we queue an internal task; downstream services
   consume it.
-- **Real SMS provider** — `OTP_DEV_CODE=123456` keeps the dev loop tight.
-  Twilio/MessageBird wires in via a single service call.
+- **Login SMS** — owned by Firebase (phone auth). The only SMS *we* send is the
+  later patient-claim possession OTP (to the on-file number), planned on Twilio.
 - **Stripe / payment processor** — `payment_methods` stores tokens, never
   PAN. The processor integration is gated behind a feature env.
 - **WebSocket / push** — message threads are polled for now. Push channel
