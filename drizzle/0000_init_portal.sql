@@ -1,4 +1,4 @@
-CREATE TYPE "public"."claim_method" AS ENUM('self_dob_phone', 'manual_admin', 'imported');--> statement-breakpoint
+CREATE TYPE "public"."claim_method" AS ENUM('self_verified_phone', 'self_dob_phone', 'manual_admin', 'imported');--> statement-breakpoint
 CREATE TYPE "public"."db_kind" AS ENUM('340b', 'conventional');--> statement-breakpoint
 CREATE TYPE "public"."command_execution_mode" AS ENUM('manual', 'auto');--> statement-breakpoint
 CREATE TYPE "public"."command_status" AS ENUM('pending', 'in_progress', 'done', 'rejected', 'canceled', 'failed');--> statement-breakpoint

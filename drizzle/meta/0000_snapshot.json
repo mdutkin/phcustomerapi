@@ -1,5 +1,5 @@
 {
-  "id": "78218feb-4335-421d-b04f-c17749002358",
+  "id": "b16cb84d-a4f8-409d-b65c-195bac811a59",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -2127,6 +2127,7 @@
       "name": "claim_method",
       "schema": "public",
       "values": [
+        "self_verified_phone",
         "self_dob_phone",
         "manual_admin",
         "imported"

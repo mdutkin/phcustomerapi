@@ -31,11 +31,17 @@ import { users } from "./auth";
 // surface so callers don't leak DB names.
 export const dbKindEnum = pgEnum("db_kind", ["340b", "conventional"]);
 
-// How a user got linked to a patient record. Used for audit and to gate
-// future re-verification. `self_dob_phone` = patient self-claimed via
-// DOB + last name + phone match. `manual_admin` = staff linked via admin
-// UI. `imported` = bulk migration.
+// How a user got linked to a patient record. Used for audit and to gate future
+// re-verification.
+//   self_verified_phone = self-claimed; possession of the on-file phone was
+//     PROVEN via Firebase phone sign-in, then last name + DOB confirmed which
+//     person on that line. This is the only self-service method.
+//   self_dob_phone = LEGACY knowledge-only claim (name + DOB + phone last 4).
+//     Retained so old rows stay readable; never written by new code.
+//   manual_admin = staff linked it after verifying identity out-of-band.
+//   imported = bulk migration.
 export const claimMethodEnum = pgEnum("claim_method", [
+  "self_verified_phone",
   "self_dob_phone",
   "manual_admin",
   "imported",

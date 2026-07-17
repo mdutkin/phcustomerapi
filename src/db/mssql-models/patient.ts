@@ -90,6 +90,67 @@ export async function getPatient(kind: DbKind, patientno: number): Promise<Prime
   return row ? rowToPatient(row) : null;
 }
 
+// PrimeRX stores PHONE/MOBILENO as char(10) — bare 10-digit US numbers, no
+// country code. Callers pass the last 10 digits of an E.164 number.
+
+/**
+ * How many ACTIVE patients share this phone number? Used as a blocklist: the
+ * legacy data has placeholder numbers on thousands of records (one PHONE is on
+ * 3,265 patients), and such a number proves nothing about identity.
+ */
+export async function countPatientsByPhone(kind: DbKind, last10: string): Promise<number> {
+  const pool = await getMssqlPool(kind);
+  const r = (await pool
+    .request()
+    .input("p", last10)
+    .query(
+      `SELECT COUNT(*) AS n
+         FROM PATIENT
+        WHERE ISNULL(ACTIVE, 'Y') <> 'N'
+          AND (
+                RIGHT(LTRIM(RTRIM(ISNULL(PHONE, ''))), 10) = @p
+             OR RIGHT(LTRIM(RTRIM(ISNULL(MOBILENO, ''))), 10) = @p
+          )`,
+    )) as { recordset: Array<{ n: number }> };
+  return r.recordset[0]?.n ?? 0;
+}
+
+/**
+ * Claim lookup: ACTIVE patients whose on-file PHONE/MOBILENO matches a phone the
+ * caller has already PROVEN possession of (Firebase phone sign-in), AND whose
+ * last name + DOB match what they typed.
+ *
+ * The phone is the POSSESSION factor; last name + DOB only confirm which person
+ * on that number it is (a household may share a line). Date comparison stays in
+ * SQL via CONVERT(date, ...) to avoid JS timezone drift on DOB.
+ */
+export async function findClaimCandidatesByVerifiedPhone(
+  kind: DbKind,
+  last10: string,
+  lastName: string,
+  dob: string, // YYYY-MM-DD
+  limit = 5,
+): Promise<PrimeRxPatient[]> {
+  const pool = await getMssqlPool(kind);
+  const r = (await pool
+    .request()
+    .input("p", last10)
+    .input("ln", lastName.trim())
+    .input("dob", dob)
+    .query(
+      `SELECT TOP ${Number(limit)} ${SELECT_COLS}
+         FROM PATIENT
+        WHERE ISNULL(ACTIVE, 'Y') <> 'N'
+          AND UPPER(LTRIM(RTRIM(LNAME))) = UPPER(@ln)
+          AND CONVERT(date, DOB) = CONVERT(date, @dob)
+          AND (
+                RIGHT(LTRIM(RTRIM(ISNULL(PHONE, ''))), 10) = @p
+             OR RIGHT(LTRIM(RTRIM(ISNULL(MOBILENO, ''))), 10) = @p
+          )`,
+    )) as { recordset: IRecordSet<PatientRow> };
+  return r.recordset.map(rowToPatient);
+}
+
 export interface PatientSearchInput {
   lastName: string;
   dob: string;        // YYYY-MM-DD
