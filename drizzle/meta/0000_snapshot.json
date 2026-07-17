@@ -1,5 +1,5 @@
 {
-  "id": "2b706ae5-bd63-432b-8927-a52306dd3582",
+  "id": "78218feb-4335-421d-b04f-c17749002358",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -221,168 +221,6 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.refill_requests": {
-      "name": "refill_requests",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "user_id": {
-          "name": "user_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "db_kind": {
-          "name": "db_kind",
-          "type": "db_kind",
-          "typeSchema": "public",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "patientno": {
-          "name": "patientno",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "rxno": {
-          "name": "rxno",
-          "type": "varchar(32)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "refill_no": {
-          "name": "refill_no",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "status": {
-          "name": "status",
-          "type": "refill_request_status",
-          "typeSchema": "public",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'queued'"
-        },
-        "requested_at": {
-          "name": "requested_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "decided_at": {
-          "name": "decided_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "decided_by": {
-          "name": "decided_by",
-          "type": "varchar(80)",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "decision_note": {
-          "name": "decision_note",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "patient_note": {
-          "name": "patient_note",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        }
-      },
-      "indexes": {
-        "refill_requests_user_idx": {
-          "name": "refill_requests_user_idx",
-          "columns": [
-            {
-              "expression": "user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "refill_requests_rx_idx": {
-          "name": "refill_requests_rx_idx",
-          "columns": [
-            {
-              "expression": "db_kind",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "patientno",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "rxno",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "refill_requests_status_idx": {
-          "name": "refill_requests_status_idx",
-          "columns": [
-            {
-              "expression": "status",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "refill_requests_user_id_users_id_fk": {
-          "name": "refill_requests_user_id_users_id_fk",
-          "tableFrom": "refill_requests",
-          "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
     "public.user_patients": {
       "name": "user_patients",
       "schema": "",
@@ -528,6 +366,242 @@
         "user_patients_user_id_users_id_fk": {
           "name": "user_patients_user_id_users_id_fk",
           "tableFrom": "user_patients",
+          "tableTo": "users",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.command_queue": {
+      "name": "command_queue",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "db_kind": {
+          "name": "db_kind",
+          "type": "db_kind",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "patientno": {
+          "name": "patientno",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "type": {
+          "name": "type",
+          "type": "command_type",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "payload": {
+          "name": "payload",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "command_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'pending'"
+        },
+        "execution_mode": {
+          "name": "execution_mode",
+          "type": "command_execution_mode",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'manual'"
+        },
+        "dedupe_key": {
+          "name": "dedupe_key",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "patient_note": {
+          "name": "patient_note",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "requested_at": {
+          "name": "requested_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "claimed_by": {
+          "name": "claimed_by",
+          "type": "varchar(120)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "claimed_at": {
+          "name": "claimed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "completed_by": {
+          "name": "completed_by",
+          "type": "varchar(120)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "completed_at": {
+          "name": "completed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "staff_note": {
+          "name": "staff_note",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "result": {
+          "name": "result",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "attempts": {
+          "name": "attempts",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "last_error": {
+          "name": "last_error",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "command_queue_inbox_idx": {
+          "name": "command_queue_inbox_idx",
+          "columns": [
+            {
+              "expression": "status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "requested_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "command_queue_user_idx": {
+          "name": "command_queue_user_idx",
+          "columns": [
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "command_queue_patient_idx": {
+          "name": "command_queue_patient_idx",
+          "columns": [
+            {
+              "expression": "db_kind",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "patientno",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "command_queue_open_uniq": {
+          "name": "command_queue_open_uniq",
+          "columns": [
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "type",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "dedupe_key",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "status in ('pending', 'in_progress')",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "command_queue_user_id_users_id_fk": {
+          "name": "command_queue_user_id_users_id_fk",
+          "tableFrom": "command_queue",
           "tableTo": "users",
           "columnsFrom": [
             "user_id"
@@ -2066,16 +2140,33 @@
         "conventional"
       ]
     },
-    "public.refill_request_status": {
-      "name": "refill_request_status",
+    "public.command_execution_mode": {
+      "name": "command_execution_mode",
       "schema": "public",
       "values": [
-        "queued",
-        "in_review",
-        "accepted",
+        "manual",
+        "auto"
+      ]
+    },
+    "public.command_status": {
+      "name": "command_status",
+      "schema": "public",
+      "values": [
+        "pending",
+        "in_progress",
+        "done",
         "rejected",
-        "filled",
-        "canceled"
+        "canceled",
+        "failed"
+      ]
+    },
+    "public.command_type": {
+      "name": "command_type",
+      "schema": "public",
+      "values": [
+        "refill_request",
+        "update_details",
+        "update_delivery"
       ]
     },
     "public.lab_flag": {

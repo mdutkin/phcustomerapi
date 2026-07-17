@@ -16,6 +16,7 @@
 export * from "./auth";
 export * from "./patients";
 export * from "./links";
+export * from "./commands";
 export * from "./labs";
 export * from "./shop";
 export * from "./orders";

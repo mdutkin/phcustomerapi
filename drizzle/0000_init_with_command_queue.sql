@@ -1,6 +1,8 @@
 CREATE TYPE "public"."claim_method" AS ENUM('self_dob_phone', 'manual_admin', 'imported');--> statement-breakpoint
 CREATE TYPE "public"."db_kind" AS ENUM('340b', 'conventional');--> statement-breakpoint
-CREATE TYPE "public"."refill_request_status" AS ENUM('queued', 'in_review', 'accepted', 'rejected', 'filled', 'canceled');--> statement-breakpoint
+CREATE TYPE "public"."command_execution_mode" AS ENUM('manual', 'auto');--> statement-breakpoint
+CREATE TYPE "public"."command_status" AS ENUM('pending', 'in_progress', 'done', 'rejected', 'canceled', 'failed');--> statement-breakpoint
+CREATE TYPE "public"."command_type" AS ENUM('refill_request', 'update_details', 'update_delivery');--> statement-breakpoint
 CREATE TYPE "public"."lab_flag" AS ENUM('OK', 'H', 'L', 'CRIT_H', 'CRIT_L');--> statement-breakpoint
 CREATE TYPE "public"."billing_status" AS ENUM('outstanding', 'paid', 'partial', 'void');--> statement-breakpoint
 CREATE TYPE "public"."delivery_status" AS ENUM('scheduled', 'preparing', 'out_for_delivery', 'delivered', 'missed', 'canceled');--> statement-breakpoint
@@ -30,21 +32,6 @@ CREATE TABLE IF NOT EXISTS "addresses" (
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
-CREATE TABLE IF NOT EXISTS "refill_requests" (
-	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
-	"user_id" uuid NOT NULL,
-	"db_kind" "db_kind" NOT NULL,
-	"patientno" integer NOT NULL,
-	"rxno" varchar(32) NOT NULL,
-	"refill_no" integer,
-	"status" "refill_request_status" DEFAULT 'queued' NOT NULL,
-	"requested_at" timestamp with time zone DEFAULT now() NOT NULL,
-	"decided_at" timestamp with time zone,
-	"decided_by" varchar(80),
-	"decision_note" text,
-	"patient_note" text
-);
---> statement-breakpoint
 CREATE TABLE IF NOT EXISTS "user_patients" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"user_id" uuid NOT NULL,
@@ -57,6 +44,28 @@ CREATE TABLE IF NOT EXISTS "user_patients" (
 	"snapshot_dob" varchar(10),
 	"snapshot_phone_last4" varchar(4),
 	"notes" text
+);
+--> statement-breakpoint
+CREATE TABLE IF NOT EXISTS "command_queue" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"user_id" uuid NOT NULL,
+	"db_kind" "db_kind" NOT NULL,
+	"patientno" integer NOT NULL,
+	"type" "command_type" NOT NULL,
+	"payload" jsonb NOT NULL,
+	"status" "command_status" DEFAULT 'pending' NOT NULL,
+	"execution_mode" "command_execution_mode" DEFAULT 'manual' NOT NULL,
+	"dedupe_key" varchar(128) NOT NULL,
+	"patient_note" text,
+	"requested_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"claimed_by" varchar(120),
+	"claimed_at" timestamp with time zone,
+	"completed_by" varchar(120),
+	"completed_at" timestamp with time zone,
+	"staff_note" text,
+	"result" jsonb,
+	"attempts" integer DEFAULT 0 NOT NULL,
+	"last_error" text
 );
 --> statement-breakpoint
 CREATE TABLE IF NOT EXISTS "lab_results" (
@@ -225,13 +234,13 @@ EXCEPTION
 END $$;
 --> statement-breakpoint
 DO $$ BEGIN
- ALTER TABLE "refill_requests" ADD CONSTRAINT "refill_requests_user_id_users_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;
+ ALTER TABLE "user_patients" ADD CONSTRAINT "user_patients_user_id_users_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;
 EXCEPTION
  WHEN duplicate_object THEN null;
 END $$;
 --> statement-breakpoint
 DO $$ BEGIN
- ALTER TABLE "user_patients" ADD CONSTRAINT "user_patients_user_id_users_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;
+ ALTER TABLE "command_queue" ADD CONSTRAINT "command_queue_user_id_users_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;
 EXCEPTION
  WHEN duplicate_object THEN null;
 END $$;
@@ -330,12 +339,13 @@ CREATE UNIQUE INDEX IF NOT EXISTS "users_firebase_uid_uniq" ON "users" USING btr
 CREATE UNIQUE INDEX IF NOT EXISTS "users_phone_uniq" ON "users" USING btree ("phone_e164");--> statement-breakpoint
 CREATE UNIQUE INDEX IF NOT EXISTS "users_email_uniq" ON "users" USING btree ("email");--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "addresses_user_idx" ON "addresses" USING btree ("user_id");--> statement-breakpoint
-CREATE INDEX IF NOT EXISTS "refill_requests_user_idx" ON "refill_requests" USING btree ("user_id");--> statement-breakpoint
-CREATE INDEX IF NOT EXISTS "refill_requests_rx_idx" ON "refill_requests" USING btree ("db_kind","patientno","rxno");--> statement-breakpoint
-CREATE INDEX IF NOT EXISTS "refill_requests_status_idx" ON "refill_requests" USING btree ("status");--> statement-breakpoint
 CREATE UNIQUE INDEX IF NOT EXISTS "user_patients_uniq" ON "user_patients" USING btree ("user_id","db_kind","patientno");--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "user_patients_user_idx" ON "user_patients" USING btree ("user_id");--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "user_patients_patient_idx" ON "user_patients" USING btree ("db_kind","patientno");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "command_queue_inbox_idx" ON "command_queue" USING btree ("status","requested_at");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "command_queue_user_idx" ON "command_queue" USING btree ("user_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "command_queue_patient_idx" ON "command_queue" USING btree ("db_kind","patientno");--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "command_queue_open_uniq" ON "command_queue" USING btree ("user_id","type","dedupe_key") WHERE status in ('pending', 'in_progress');--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "lab_user_idx" ON "lab_results" USING btree ("user_id");--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "lab_code_idx" ON "lab_results" USING btree ("test_code");--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "lab_collected_idx" ON "lab_results" USING btree ("collected_at");--> statement-breakpoint
