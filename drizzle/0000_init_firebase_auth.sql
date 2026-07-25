@@ -6,33 +6,11 @@ CREATE TYPE "public"."billing_status" AS ENUM('outstanding', 'paid', 'partial', 
 CREATE TYPE "public"."delivery_status" AS ENUM('scheduled', 'preparing', 'out_for_delivery', 'delivered', 'missed', 'canceled');--> statement-breakpoint
 CREATE TYPE "public"."order_status" AS ENUM('pending', 'paid', 'preparing', 'shipped', 'out_for_delivery', 'delivered', 'canceled', 'refunded');--> statement-breakpoint
 CREATE TYPE "public"."sender_role" AS ENUM('patient', 'pharm', 'doc', 'support', 'system');--> statement-breakpoint
-CREATE TABLE IF NOT EXISTS "otp_challenges" (
-	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
-	"phone_e164" varchar(20) NOT NULL,
-	"code_hash" text NOT NULL,
-	"attempts" text DEFAULT '0' NOT NULL,
-	"expires_at" timestamp with time zone NOT NULL,
-	"consumed_at" timestamp with time zone,
-	"created_at" timestamp with time zone DEFAULT now() NOT NULL
-);
---> statement-breakpoint
-CREATE TABLE IF NOT EXISTS "refresh_tokens" (
-	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
-	"user_id" uuid NOT NULL,
-	"token_hash" text NOT NULL,
-	"user_agent" text,
-	"ip" varchar(45),
-	"expires_at" timestamp with time zone NOT NULL,
-	"revoked_at" timestamp with time zone,
-	"created_at" timestamp with time zone DEFAULT now() NOT NULL
-);
---> statement-breakpoint
 CREATE TABLE IF NOT EXISTS "users" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
-	"email" varchar(254),
+	"firebase_uid" varchar(128) NOT NULL,
 	"phone_e164" varchar(20),
-	"password_hash" text,
-	"google_sub" varchar(64),
+	"email" varchar(254),
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"last_login_at" timestamp with time zone
@@ -241,12 +219,6 @@ CREATE TABLE IF NOT EXISTS "audit_log" (
 );
 --> statement-breakpoint
 DO $$ BEGIN
- ALTER TABLE "refresh_tokens" ADD CONSTRAINT "refresh_tokens_user_id_users_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;
-EXCEPTION
- WHEN duplicate_object THEN null;
-END $$;
---> statement-breakpoint
-DO $$ BEGIN
  ALTER TABLE "addresses" ADD CONSTRAINT "addresses_user_id_users_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;
 EXCEPTION
  WHEN duplicate_object THEN null;
@@ -354,12 +326,9 @@ EXCEPTION
  WHEN duplicate_object THEN null;
 END $$;
 --> statement-breakpoint
-CREATE INDEX IF NOT EXISTS "otp_phone_idx" ON "otp_challenges" USING btree ("phone_e164");--> statement-breakpoint
-CREATE INDEX IF NOT EXISTS "otp_expires_idx" ON "otp_challenges" USING btree ("expires_at");--> statement-breakpoint
-CREATE INDEX IF NOT EXISTS "refresh_user_idx" ON "refresh_tokens" USING btree ("user_id");--> statement-breakpoint
-CREATE UNIQUE INDEX IF NOT EXISTS "users_email_uniq" ON "users" USING btree ("email");--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "users_firebase_uid_uniq" ON "users" USING btree ("firebase_uid");--> statement-breakpoint
 CREATE UNIQUE INDEX IF NOT EXISTS "users_phone_uniq" ON "users" USING btree ("phone_e164");--> statement-breakpoint
-CREATE UNIQUE INDEX IF NOT EXISTS "users_google_uniq" ON "users" USING btree ("google_sub");--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "users_email_uniq" ON "users" USING btree ("email");--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "addresses_user_idx" ON "addresses" USING btree ("user_id");--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "refill_requests_user_idx" ON "refill_requests" USING btree ("user_id");--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "refill_requests_rx_idx" ON "refill_requests" USING btree ("db_kind","patientno","rxno");--> statement-breakpoint

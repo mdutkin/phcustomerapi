@@ -1,8 +1,11 @@
-// Hermetic shape tests for the new hybrid routes. Doesn't hit MSSQL or
-// PG — just verifies the app boots and unauthenticated calls to the
-// PHI-protected endpoints get 401, not 500. This catches the most
-// common breakage class (route registered but plugin order wrong, or
-// schema build fails).
+// Hermetic shape tests. Doesn't hit MSSQL, PG, or Firebase — just verifies the
+// app boots and unauthenticated calls to the PHI-protected endpoints get 401,
+// not 500. Catches the common breakage class (route registered but plugin
+// order wrong, or schema build fails). The auth plugin rejects missing/blank
+// Bearer tokens BEFORE any Firebase verification, so these stay hermetic.
+//
+// The authenticated happy paths (real Firebase ID token → user provisioning →
+// 200) are exercised separately against the Firebase Auth emulator, not here.
 
 import { describe, expect, it, afterAll, beforeAll } from "vitest";
 import type { FastifyInstance } from "fastify";
@@ -10,8 +13,10 @@ import type { FastifyInstance } from "fastify";
 let app: FastifyInstance;
 
 beforeAll(async () => {
-  process.env.NODE_ENV ||= "test";
-  process.env.JWT_SECRET ||= "test_secret_must_be_at_least_32_characters_long";
+  process.env.NODE_ENV = "test"; // force — host may export NODE_ENV=production
+  // Firebase: point at the emulator so plugin init needs no real credentials.
+  process.env.FIREBASE_PROJECT_ID ||= "demo-phcustomerapi";
+  process.env.FIREBASE_AUTH_EMULATOR_HOST ||= "127.0.0.1:9099";
   process.env.DATABASE_URL ||= "postgres://postgres:postgres@localhost:5432/phcustomerapi_test";
   process.env.MSSQL_HOST ||= "127.0.0.1";
   process.env.MSSQL_PORT ||= "1433";
@@ -57,22 +62,19 @@ describe("authentication gates", () => {
     });
     expect(res.statusCode).toBe(401);
   });
-});
 
-describe("body validation", () => {
-  it("rejects malformed claim payload at the schema layer", async () => {
-    // Forge a token to exercise the claim route's body validator
-    // without needing a real PG/MSSQL stack.
-    const accessToken = app.jwt.sign(
-      { sub: "00000000-0000-0000-0000-000000000000", type: "access" },
-      { expiresIn: "1m" },
-    );
+  it("rejects a malformed Bearer token", async () => {
     const res = await app.inject({
-      method: "POST",
-      url: "/me/claim",
-      headers: { authorization: `Bearer ${accessToken}` },
-      payload: { lastName: "", dob: "not-a-date", phone: "1" },
+      method: "GET",
+      url: "/me",
+      headers: { authorization: "Bearer not-a-real-token" },
     });
-    expect(res.statusCode).toBe(400);
+    expect(res.statusCode).toBe(401);
+  });
+
+  it("keeps /health open (no auth)", async () => {
+    const res = await app.inject({ method: "GET", url: "/health" });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ ok: true, service: "phcustomerapi" });
   });
 });

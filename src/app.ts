@@ -13,7 +13,6 @@ import { env, isProd } from "@/config/env";
 import { pingMssql } from "@/db/mssql";
 import authPlugin from "@/plugins/auth";
 import errorHandler from "@/plugins/error-handler";
-import { authRoutes } from "@/modules/auth/auth.routes";
 import { patientRoutes } from "@/modules/patients/patients.routes";
 import { prescriptionRoutes } from "@/modules/prescriptions/prescriptions.routes";
 import { labRoutes } from "@/modules/labs/labs.routes";
@@ -94,7 +93,6 @@ export async function buildApp(): Promise<FastifyInstance> {
     };
   });
 
-  await app.register(authRoutes);
   await app.register(patientRoutes);
   await app.register(prescriptionRoutes);
   await app.register(labRoutes);
