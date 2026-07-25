@@ -14,6 +14,7 @@ import { pingMssql } from "@/db/mssql";
 import authPlugin from "@/plugins/auth";
 import errorHandler from "@/plugins/error-handler";
 import { patientRoutes } from "@/modules/patients/patients.routes";
+import { requestRoutes } from "@/modules/requests/requests.routes";
 import { prescriptionRoutes } from "@/modules/prescriptions/prescriptions.routes";
 import { labRoutes } from "@/modules/labs/labs.routes";
 import { shopRoutes } from "@/modules/shop/shop.routes";
@@ -94,6 +95,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   });
 
   await app.register(patientRoutes);
+  await app.register(requestRoutes);
   await app.register(prescriptionRoutes);
   await app.register(labRoutes);
   await app.register(shopRoutes);

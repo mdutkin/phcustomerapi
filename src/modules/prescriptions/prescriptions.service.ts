@@ -1,12 +1,10 @@
 // Prescription read service.
 //
-// Reads come from MSSQL (PrimeRX is the system of record). Refill
-// requests are queued in PG (`refill_requests`); pharmacy staff process
-// them in PrimeRX, and the resulting CLAIMS row updates downstream.
+// Reads come from MSSQL (PrimeRX is the system of record). Refill requests are
+// enqueued into the unified `command_queue` in PG; a pharmacist performs the
+// refill in the PrimeRX client, and the resulting CLAIMS row updates
+// downstream. We never write to MSSQL from here.
 
-import { and, desc, eq } from "drizzle-orm";
-import { db } from "@/db/client";
-import { refillRequests } from "@/db/schema";
 import {
   getDrug,
   getPrescriber,
@@ -15,6 +13,7 @@ import {
   listPrescriptionsForPatient,
 } from "@/db/mssql-models";
 import type { DbKind, PrimeRxClaim, PrimeRxDrug, PrimeRxPrescriber } from "@/db/mssql-models";
+import { enqueueCommand, findOpenCommand } from "@/modules/requests/requests.service";
 import { HttpError } from "@/plugins/error-handler";
 
 export interface RxListItem {
@@ -101,22 +100,9 @@ export async function getPrescriptionDetail(
   ]);
 
   // Surface any open refill request the user has for this Rx so the UI
-  // can disable the "Request refill" button.
-  const [pending] = await db
-    .select()
-    .from(refillRequests)
-    .where(
-      and(
-        eq(refillRequests.userId, userId),
-        eq(refillRequests.dbKind, kind),
-        eq(refillRequests.patientno, patientno),
-        eq(refillRequests.rxno, rxno),
-      ),
-    )
-    .orderBy(desc(refillRequests.requestedAt))
-    .limit(1);
-
-  const isOpen = pending && ["queued", "in_review", "accepted"].includes(pending.status);
+  // can disable the "Request refill" button. Refills live in the unified
+  // command queue, keyed by RXNO.
+  const pending = await findOpenCommand(userId, "refill_request", rxno);
 
   return {
     rx: claimToListItem(claim, kind, drug),
@@ -128,11 +114,11 @@ export async function getPrescriptionDetail(
       pickedUp: h.pickedUp,
       pickupDate: h.pickupDate ? h.pickupDate.toISOString() : null,
     })),
-    pendingRefillRequest: isOpen
+    pendingRefillRequest: pending
       ? {
-          id: pending!.id,
-          status: pending!.status,
-          requestedAt: pending!.requestedAt.toISOString(),
+          id: pending.id,
+          status: pending.status,
+          requestedAt: pending.requestedAt,
         }
       : null,
   };
@@ -148,40 +134,28 @@ export interface QueueRefillInput {
 }
 
 export async function queueRefillRequest(input: QueueRefillInput): Promise<{ id: string }> {
-  // Reject duplicate open requests for the same Rx.
-  const open = await db
-    .select({ id: refillRequests.id, status: refillRequests.status })
-    .from(refillRequests)
-    .where(
-      and(
-        eq(refillRequests.userId, input.userId),
-        eq(refillRequests.dbKind, input.kind),
-        eq(refillRequests.patientno, input.patientno),
-        eq(refillRequests.rxno, input.rxno),
-      ),
-    );
-  if (open.some((r) => ["queued", "in_review", "accepted"].includes(r.status))) {
-    throw new HttpError(409, "refill_already_pending");
-  }
-
-  // Verify the Rx actually exists and belongs to the patient.
+  // Verify the Rx actually exists and belongs to the patient before we put a
+  // job on a pharmacist's desk.
   const claim = await getPrescription(input.kind, input.patientno, input.rxno);
   if (!claim) throw new HttpError(404, "prescription_not_found");
   if (claim.totalRefills > 0 && claim.refillNo >= claim.totalRefills) {
     throw new HttpError(409, "no_refills_remaining");
   }
 
-  const [row] = await db
-    .insert(refillRequests)
-    .values({
-      userId: input.userId,
-      dbKind: input.kind,
-      patientno: input.patientno,
+  // Lands in the unified command queue; a pharmacist performs the refill in the
+  // PrimeRX client. Dedupe is per-RXNO, so one open refill request per Rx.
+  const cmd = await enqueueCommand({
+    userId: input.userId,
+    kind: input.kind,
+    patientno: input.patientno,
+    type: "refill_request",
+    dedupeKey: input.rxno,
+    patientNote: input.patientNote,
+    payload: {
       rxno: input.rxno,
       refillNo: input.refillNo,
-      patientNote: input.patientNote,
-    })
-    .returning({ id: refillRequests.id });
-  if (!row) throw new HttpError(500, "refill_queue_failed");
-  return row;
+      drugName: claim.drgname ?? null,
+    },
+  });
+  return { id: cmd.id };
 }

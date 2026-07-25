@@ -63,6 +63,20 @@ describe("authentication gates", () => {
     expect(res.statusCode).toBe(401);
   });
 
+  it("rejects unauthenticated /requests", async () => {
+    const res = await app.inject({ method: "GET", url: "/requests" });
+    expect(res.statusCode).toBe(401);
+  });
+
+  it("rejects unauthenticated /requests/update-details", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/requests/update-details",
+      payload: { phone: "+14155550192" },
+    });
+    expect(res.statusCode).toBe(401);
+  });
+
   it("rejects a malformed Bearer token", async () => {
     const res = await app.inject({
       method: "GET",

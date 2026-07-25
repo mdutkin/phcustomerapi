@@ -52,10 +52,12 @@ const MeResponse = z.object({
   ),
 });
 
+// No phone field: the phone is the POSSESSION factor and is taken from the
+// Firebase-verified token, never from the caller. Last name + DOB only confirm
+// which person on that number this is.
 const ClaimBody = z.object({
   lastName: z.string().min(1).max(80),
   dob: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  phone: z.string().min(4).max(32),
 });
 
 const ClaimResponse = z.object({
@@ -123,14 +125,21 @@ export const patientRoutes: FastifyPluginAsyncZod = async (app) => {
     },
   }, async (req, reply) => {
     const userId = req.user.sub;
-    const result = await claimPatient(userId, req.body);
+    // req.user.phone is the number Firebase verified at sign-in — the
+    // possession factor. Never trust a phone from the request body here.
+    const result = await claimPatient(userId, req.user.phone, req.body);
 
     await recordAudit(req, {
       action: "patient.claim",
       resourceType: "user_patient",
       resourceId: `${result.dbKind}:${result.patientno}`,
       subjectUserId: userId,
-      metadata: { dbKind: result.dbKind, patientno: result.patientno },
+      metadata: {
+        dbKind: result.dbKind,
+        patientno: result.patientno,
+        linkedDbKinds: result.linkedDbKinds,
+        method: "self_verified_phone",
+      },
     });
 
     reply.code(201);

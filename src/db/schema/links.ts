@@ -6,10 +6,11 @@
 // exist in only one or in both, so the link is composite: (user_id,
 // db_kind, patientno). Most users will have a single link.
 //
-// `refill_requests` is the portal's queue of refill intents. We do NOT
-// write to MSSQL — the pharmacy still drives fulfillment in PrimeRX. A
-// refill request lands here, the pharmacy picks it up, and once filled
-// the source of truth (CLAIMS row in MSSQL) updates downstream views.
+// Refill intents used to live here as `refill_requests`. They now live in
+// the unified `command_queue` (see ./commands) as type='refill_request',
+// so the pharmacist gets ONE inbox across every request type rather than a
+// queue per feature. We still never write to MSSQL — a pharmacist performs
+// the change in the PrimeRX client and the CLAIMS row updates downstream.
 
 import {
   pgTable,
@@ -30,11 +31,17 @@ import { users } from "./auth";
 // surface so callers don't leak DB names.
 export const dbKindEnum = pgEnum("db_kind", ["340b", "conventional"]);
 
-// How a user got linked to a patient record. Used for audit and to gate
-// future re-verification. `self_dob_phone` = patient self-claimed via
-// DOB + last name + phone match. `manual_admin` = staff linked via admin
-// UI. `imported` = bulk migration.
+// How a user got linked to a patient record. Used for audit and to gate future
+// re-verification.
+//   self_verified_phone = self-claimed; possession of the on-file phone was
+//     PROVEN via Firebase phone sign-in, then last name + DOB confirmed which
+//     person on that line. This is the only self-service method.
+//   self_dob_phone = LEGACY knowledge-only claim (name + DOB + phone last 4).
+//     Retained so old rows stay readable; never written by new code.
+//   manual_admin = staff linked it after verifying identity out-of-band.
+//   imported = bulk migration.
 export const claimMethodEnum = pgEnum("claim_method", [
+  "self_verified_phone",
   "self_dob_phone",
   "manual_admin",
   "imported",
@@ -68,47 +75,6 @@ export const userPatients = pgTable(
     userIdx: index("user_patients_user_idx").on(t.userId),
     // Helps pharmacy admin lookups: "who is linked to PATIENTNO 12345 in 340B?"
     patientIdx: index("user_patients_patient_idx").on(t.dbKind, t.patientno),
-  }),
-);
-
-export const refillRequestStatusEnum = pgEnum("refill_request_status", [
-  "queued",
-  "in_review",
-  "accepted",
-  "rejected",
-  "filled",
-  "canceled",
-]);
-
-export const refillRequests = pgTable(
-  "refill_requests",
-  {
-    id: uuid("id").primaryKey().defaultRandom(),
-    userId: uuid("user_id")
-      .notNull()
-      .references(() => users.id, { onDelete: "cascade" }),
-    // The PrimeRX patient this refill is for. We keep these denormalised
-    // (rather than FK to user_patients.id) so a single refill request
-    // survives even if the link row is later changed/replaced.
-    dbKind: dbKindEnum("db_kind").notNull(),
-    patientno: integer("patientno").notNull(),
-    // CLAIMS.RXNO is BIGINT in MSSQL — store as bigint-safe text to
-    // avoid JS number truncation. Format is digits only.
-    rxno: varchar("rxno", { length: 32 }).notNull(),
-    // Optional: which fill cycle this is for (NREFILL on CLAIMS).
-    refillNo: integer("refill_no"),
-    status: refillRequestStatusEnum("status").notNull().default("queued"),
-    requestedAt: timestamp("requested_at", { withTimezone: true }).notNull().defaultNow(),
-    decidedAt: timestamp("decided_at", { withTimezone: true }),
-    decidedBy: varchar("decided_by", { length: 80 }),
-    decisionNote: text("decision_note"),
-    // Optional patient-supplied note — "running low, please rush".
-    patientNote: text("patient_note"),
-  },
-  (t) => ({
-    userIdx: index("refill_requests_user_idx").on(t.userId),
-    rxIdx: index("refill_requests_rx_idx").on(t.dbKind, t.patientno, t.rxno),
-    statusIdx: index("refill_requests_status_idx").on(t.status),
   }),
 );
 
