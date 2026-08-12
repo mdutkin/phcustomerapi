@@ -42,8 +42,19 @@ function initFirebase(): FirebaseApp {
   if (env.FIREBASE_AUTH_EMULATOR_HOST) {
     return initializeApp({ projectId: env.FIREBASE_PROJECT_ID });
   }
+  // Preferred for prod: point at the service-account JSON file on disk. cert()
+  // reads + parses it itself, so we never have to shuttle a PEM private key
+  // through an env var (which mangles newlines → ERR_OSSL_UNSUPPORTED).
+  if (env.FIREBASE_SERVICE_ACCOUNT_FILE) {
+    return initializeApp({
+      projectId: env.FIREBASE_PROJECT_ID,
+      credential: cert(env.FIREBASE_SERVICE_ACCOUNT_FILE),
+    });
+  }
   if (!env.FIREBASE_SERVICE_ACCOUNT_JSON) {
-    throw new Error("FIREBASE_SERVICE_ACCOUNT_JSON is required when not using the auth emulator");
+    throw new Error(
+      "Set FIREBASE_SERVICE_ACCOUNT_FILE (path) or FIREBASE_SERVICE_ACCOUNT_JSON when not using the auth emulator",
+    );
   }
   const svc = JSON.parse(env.FIREBASE_SERVICE_ACCOUNT_JSON) as {
     project_id: string;

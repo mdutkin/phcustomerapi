@@ -76,6 +76,9 @@ const EnvSchema = z.object({
   //   (read directly by firebase-admin) and the SDK skips real credentials.
   FIREBASE_PROJECT_ID: z.string().min(1),
   FIREBASE_SERVICE_ACCOUNT_JSON: z.string().optional(),
+  // Preferred for prod: path to the service-account JSON file on disk (avoids
+  // shuttling a PEM private key through an env var).
+  FIREBASE_SERVICE_ACCOUNT_FILE: z.string().optional(),
   // Standard firebase-admin env var; presence routes the SDK at the emulator.
   FIREBASE_AUTH_EMULATOR_HOST: z.string().optional(),
 
@@ -111,8 +114,9 @@ export const isTest = env.NODE_ENV === "test";
 
 // Hard fail if prod is starting without real Firebase credentials (the emulator
 // must never be used in production).
-if (isProd && (!env.FIREBASE_SERVICE_ACCOUNT_JSON || env.FIREBASE_AUTH_EMULATOR_HOST)) {
+const hasFirebaseCreds = env.FIREBASE_SERVICE_ACCOUNT_FILE || env.FIREBASE_SERVICE_ACCOUNT_JSON;
+if (isProd && (!hasFirebaseCreds || env.FIREBASE_AUTH_EMULATOR_HOST)) {
   // eslint-disable-next-line no-console
-  console.error("❌ Refusing to start production without FIREBASE_SERVICE_ACCOUNT_JSON / with the auth emulator");
+  console.error("❌ Refusing to start production without Firebase credentials / with the auth emulator");
   process.exit(1);
 }
