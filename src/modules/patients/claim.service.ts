@@ -22,7 +22,7 @@
 // file (changed phone) — that needs an OTP to the on-file number via Twilio.
 // Until then those users get the staff path.
 
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "@/db/client";
 import { userPatients } from "@/db/schema";
 import { countPatientsByPhone, findClaimCandidatesByVerifiedPhone } from "@/db/mssql-models";
@@ -101,39 +101,55 @@ export async function claimPatient(
 
   if (matches.length === 0) throw unverified();
 
-  // The same human often exists in BOTH databases under one PATIENTNO (340B +
-  // Conventional) — that's one identity, so link both and they see all their
-  // Rxs. Different PATIENTNOs matching the same identity is genuinely ambiguous.
-  const distinct = new Set(matches.map((m) => m.patient.patientno));
-  if (distinct.size > 1) {
-    throw new HttpError(
-      409,
-      "ambiguous_match",
-      "More than one record matches. Please call the pharmacy so we can verify your identity.",
-    );
+  // The same human commonly exists in BOTH databases (340B + Conventional), but
+  // each DB assigns its OWN PATIENTNO — the two rows do NOT share a number. They
+  // are still one identity (same verified phone + last name + DOB), so we link
+  // both and the patient sees all their Rxs. Genuine ambiguity is two DIFFERENT
+  // people matching WITHIN a single database.
+  const byDb = new Map<DbKind, Array<{ dbKind: DbKind; patient: PrimeRxPatient }>>();
+  for (const m of matches) {
+    const arr = byDb.get(m.dbKind) ?? [];
+    arr.push(m);
+    byDb.set(m.dbKind, arr);
+  }
+  for (const [, hits] of byDb) {
+    const distinctInDb = new Set(hits.map((h) => h.patient.patientno));
+    if (distinctInDb.size > 1) {
+      throw new HttpError(
+        409,
+        "ambiguous_match",
+        "More than one record matches. Please call the pharmacy so we can verify your identity.",
+      );
+    }
   }
 
-  const patientno = matches[0]!.patient.patientno;
+  // At most one record per database now → that's our person. Link each DB's row.
+  const links = [...byDb.values()].map((hits) => hits[0]!);
 
-  // Don't let a second account claim a patient someone already holds.
-  const [taken] = await db
-    .select({ id: userPatients.id })
-    .from(userPatients)
-    .where(eq(userPatients.patientno, patientno))
-    .limit(1);
-  if (taken) {
-    throw new HttpError(
-      409,
-      "patient_already_claimed",
-      "That patient record is already linked to an account. Please call the pharmacy.",
-    );
+  // Don't let a second account claim a record someone already holds. PATIENTNO is
+  // only unique WITHIN a database, so match on (dbKind, patientno) together.
+  for (const l of links) {
+    const [taken] = await db
+      .select({ id: userPatients.id })
+      .from(userPatients)
+      .where(
+        and(eq(userPatients.dbKind, l.dbKind), eq(userPatients.patientno, l.patient.patientno)),
+      )
+      .limit(1);
+    if (taken) {
+      throw new HttpError(
+        409,
+        "patient_already_claimed",
+        "That patient record is already linked to an account. Please call the pharmacy.",
+      );
+    }
   }
 
   await db.insert(userPatients).values(
-    matches.map((m, i) => ({
+    links.map((l, i) => ({
       userId,
-      dbKind: m.dbKind,
-      patientno: m.patient.patientno,
+      dbKind: l.dbKind,
+      patientno: l.patient.patientno,
       isPrimary: i === 0,
       claimMethod: "self_verified_phone" as const,
       snapshotLastName: input.lastName.slice(0, 80),
@@ -143,9 +159,9 @@ export async function claimPatient(
   );
 
   return {
-    dbKind: matches[0]!.dbKind,
-    patientno,
-    patient: matches[0]!.patient,
-    linkedDbKinds: matches.map((m) => m.dbKind),
+    dbKind: links[0]!.dbKind,
+    patientno: links[0]!.patient.patientno,
+    patient: links[0]!.patient,
+    linkedDbKinds: links.map((l) => l.dbKind),
   };
 }

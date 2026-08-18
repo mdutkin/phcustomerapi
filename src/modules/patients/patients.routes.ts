@@ -37,6 +37,15 @@ const MeResponse = z.object({
     phoneE164: z.string().nullable(),
     createdAt: z.string(),
   }),
+  // The claimed PrimeRX link (primary record). null → not yet claimed. The
+  // portal routes on this: `link === null` sends the user to the claim screen.
+  link: z
+    .object({
+      dbKind: z.enum(["340b", "conventional"]),
+      patientno: z.number(),
+      isPrimary: z.boolean(),
+    })
+    .nullable(),
   patient: PatientSchema.nullable(),
   addresses: z.array(
     z.object({
@@ -90,6 +99,9 @@ export const patientRoutes: FastifyPluginAsyncZod = async (app) => {
         phoneE164: out.user.phoneE164,
         createdAt: out.user.createdAt.toISOString(),
       },
+      link: out.link
+        ? { dbKind: out.link.dbKind, patientno: out.link.patientno, isPrimary: out.link.isPrimary }
+        : null,
       patient:
         out.patient && out.link
           ? {
