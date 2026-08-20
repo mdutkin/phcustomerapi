@@ -81,6 +81,8 @@ export interface PrimeRxClaim {
   handoff: "delivered" | "picked_up" | null;
   /** Set when STATUS='F' (filed/deferred): why it was never dispensed. */
   filedReasonId: number | null;
+  /** Local time-of-day string PrimeRX records with the pickup/delivery. */
+  pickupTime: string | null;
   totalAmount: string | null;  // money — keep as string for precision
   copay: string | null;
   is340b: boolean;

@@ -34,6 +34,7 @@ const RxListItemSchema = z.object({
   pickedUp: z.boolean(),
   pickupDate: z.string().nullable(),
   handoff: z.enum(["delivered", "picked_up"]).nullable(),
+  pickupTime: z.string().nullable(),
   dispensed: z.boolean(),
   filedReason: z.string().nullable(),
   is340b: z.boolean(),
@@ -41,6 +42,16 @@ const RxListItemSchema = z.object({
 
 const RxDetailResponse = z.object({
   rx: RxListItemSchema,
+  delivery: z
+    .object({
+      address: z.string().nullable(),
+      instructions: z.string().nullable(),
+      requestedDate: z.string().nullable(),
+      deliveredDate: z.string().nullable(),
+      driver: z.string().nullable(),
+      trackingNo: z.string().nullable(),
+    })
+    .nullable(),
   prescriber: z
     .object({
       presno: z.number().int(),
@@ -60,6 +71,7 @@ const RxDetailResponse = z.object({
       pickedUp: z.boolean(),
       pickupDate: z.string().nullable(),
       handoff: z.enum(["delivered", "picked_up"]).nullable(),
+      pickupTime: z.string().nullable(),
       dispensed: z.boolean(),
       filedReason: z.string().nullable(),
     }),
@@ -121,6 +133,7 @@ export const prescriptionRoutes: FastifyPluginAsyncZod = async (app) => {
 
     return {
       rx: detail.rx,
+      delivery: detail.delivery,
       prescriber: detail.prescriber
         ? {
             presno: detail.prescriber.presno,

@@ -6,6 +6,7 @@
 // downstream. We never write to MSSQL from here.
 
 import {
+  getDeliveryForRx,
   getFiledDeferredReasons,
   getDrug,
   getPrescriber,
@@ -34,6 +35,8 @@ export interface RxListItem {
   pickedUp: boolean;
   pickupDate: string | null;
   handoff: "delivered" | "picked_up" | null;
+  /** Time of day PrimeRX recorded for the pickup/delivery, when present. */
+  pickupTime: string | null;
   /** False when PrimeRX filed/deferred this fill instead of dispensing it. */
   dispensed: boolean;
   /** Why it was filed/deferred, when the pharmacy recorded a reason. */
@@ -64,6 +67,7 @@ function claimToListItem(
     pickedUp: c.pickedUp,
     pickupDate: c.pickupDate ? c.pickupDate.toISOString() : null,
     handoff: c.handoff,
+    pickupTime: c.pickupTime,
     // 'F' = filed/deferred: on file, never handed to the patient.
     dispensed: (c.status ?? "").trim().toUpperCase() !== "F",
     filedReason:
@@ -115,8 +119,19 @@ export async function resolveRxLink(
   throw new HttpError(404, "prescription_not_found");
 }
 
+export interface DeliveryInfo {
+  address: string | null;
+  instructions: string | null;
+  requestedDate: string | null;
+  deliveredDate: string | null;
+  driver: string | null;
+  trackingNo: string | null;
+}
+
 export interface RxDetail {
   rx: RxListItem;
+  /** Where the last delivery of this Rx went. Null if never delivered. */
+  delivery: DeliveryInfo | null;
   prescriber: PrimeRxPrescriber | null;
   history: Array<{
     refillNo: number;
@@ -125,6 +140,7 @@ export interface RxDetail {
     pickedUp: boolean;
     pickupDate: string | null;
     handoff: "delivered" | "picked_up" | null;
+    pickupTime: string | null;
     dispensed: boolean;
     filedReason: string | null;
   }>;
@@ -144,11 +160,12 @@ export async function getPrescriptionDetail(
   const claim = await getPrescription(kind, patientno, rxno);
   if (!claim) throw new HttpError(404, "prescription_not_found");
 
-  const [drug, prescriber, history, reasons] = await Promise.all([
+  const [drug, prescriber, history, reasons, delivery] = await Promise.all([
     claim.ndc ? getDrug(kind, claim.ndc) : Promise.resolve(null),
     claim.presno !== null ? getPrescriber(kind, claim.presno) : Promise.resolve(null),
     getPrescriptionHistory(kind, patientno, rxno),
     getFiledDeferredReasons(kind),
+    getDeliveryForRx(kind, rxno),
   ]);
 
   // Surface any open refill request the user has for this Rx so the UI
@@ -158,6 +175,16 @@ export async function getPrescriptionDetail(
 
   return {
     rx: claimToListItem(claim, kind, drug, reasons),
+    delivery: delivery
+      ? {
+          address: delivery.address,
+          instructions: delivery.instructions,
+          requestedDate: delivery.requestedDate ? delivery.requestedDate.toISOString() : null,
+          deliveredDate: delivery.deliveredDate ? delivery.deliveredDate.toISOString() : null,
+          driver: delivery.driver,
+          trackingNo: delivery.trackingNo,
+        }
+      : null,
     prescriber,
     history: history.map((h) => ({
       refillNo: h.refillNo,
@@ -166,6 +193,7 @@ export async function getPrescriptionDetail(
       pickedUp: h.pickedUp,
       pickupDate: h.pickupDate ? h.pickupDate.toISOString() : null,
       handoff: h.handoff,
+      pickupTime: h.pickupTime,
       dispensed: (h.status ?? "").trim().toUpperCase() !== "F",
       filedReason: h.filedReasonId != null ? (reasons.get(h.filedReasonId) ?? null) : null,
     })),

@@ -28,6 +28,7 @@ interface ClaimRow {
   PICKEDUP: string | null;
   PICKUPDATE: Date | null;
   PICKUPFROM: string | null;
+  PICKUPTIME: string | null;
   FiledDeferredReasonID: number | null;
   TOTAMT: string | number | null;
   COPAY: string | number | null;
@@ -82,6 +83,7 @@ function rowToClaim(r: ClaimRow): PrimeRxClaim {
     pickedUp: (r.PICKEDUP ?? "").trim().toUpperCase() === "Y",
     pickupDate: r.PICKUPDATE,
     handoff: handoffOf(r),
+    pickupTime: r.PICKUPTIME?.trim() || null,
     filedReasonId: r.FiledDeferredReasonID ?? null,
     totalAmount: moneyStr(r.TOTAMT),
     copay: moneyStr(r.COPAY),
@@ -95,7 +97,7 @@ const SELECT_COLS = `
   NDC, DRGNAME, STATUS,
   DATEO, DATEF, DAYS, QTY_ORD, QUANT,
   SIG, SIGLINES,
-  PICKEDUP, PICKUPDATE, PICKUPFROM, FiledDeferredReasonID,
+  PICKEDUP, PICKUPDATE, PICKUPTIME, PICKUPFROM, FiledDeferredReasonID,
   TOTAMT, COPAY, IS340B, DELIVERY
 `;
 
@@ -200,4 +202,73 @@ export async function getFiledDeferredReasons(kind: DbKind): Promise<Map<number,
   }
   reasonCache.set(kind, map);
   return map;
+}
+
+
+// ─── Delivery ───────────────────────────────────────────────────────────────
+//
+// Deliveries live in their own subsystem (DELIVERY_ORDER + DELIVERY_DETAIL).
+// NOTE: DELIVERY_ORDER.DelStatus is NOT a reliable "was it delivered" signal —
+// staff frequently leave orders open ('O') with a null DateDelivered even after
+// the driver has been. CLAIMS.PICKEDUP/PICKUPDATE is the source of truth for
+// that; this table is what tells us WHERE it went, WHEN it was requested and
+// WHO drove it.
+
+export interface PrimeRxDelivery {
+  orderId: number;
+  address: string | null;
+  instructions: string | null;
+  requestedDate: Date | null;
+  deliveredDate: Date | null;
+  driver: string | null;
+  acceptedBy: string | null;
+  trackingNo: string | null;
+}
+
+export async function getDeliveryForRx(
+  kind: DbKind,
+  rxno: string,
+): Promise<PrimeRxDelivery | null> {
+  const pool = await getMssqlPool(kind);
+  const r = (await pool
+    .request()
+    .input("rx", rxno)
+    .query(
+      `SELECT TOP 1
+              o.DelPatRecId, o.PATIENTADDRESS, o.DelInstructions, o.ReqDelDate,
+              ISNULL(d.DateDelivered, o.DateDelivered) AS DateDelivered,
+              o.DRIVER, o.DelAcceptedBy, o.Ship_TrackingNo
+         FROM DELIVERY_DETAIL d
+         JOIN DELIVERY_ORDER o ON o.DelPatRecId = d.DelPatRecId
+        WHERE d.RxNo = @rx
+        ORDER BY ISNULL(d.DateDelivered, o.ReqDelDate) DESC`,
+    )) as {
+    recordset: Array<{
+      DelPatRecId: number;
+      PATIENTADDRESS: string | null;
+      DelInstructions: string | null;
+      ReqDelDate: Date | null;
+      DateDelivered: Date | null;
+      DRIVER: string | null;
+      DelAcceptedBy: string | null;
+      Ship_TrackingNo: string | null;
+    }>;
+  };
+  const row = r.recordset[0];
+  if (!row) return null;
+  const clean = (v: string | null) => {
+    const t = (v ?? "").trim();
+    return t.length > 0 ? t : null;
+  };
+  return {
+    orderId: row.DelPatRecId,
+    // Stored as "STREET,,CITY,ST,ZIP" — tidy the doubled/edge commas.
+    address: clean(row.PATIENTADDRESS)?.replace(/\s*,\s*/g, ", ").replace(/(,\s*)+/g, ", ").replace(/^,\s*|,\s*$/g, "") ?? null,
+    instructions: clean(row.DelInstructions),
+    requestedDate: row.ReqDelDate,
+    deliveredDate: row.DateDelivered,
+    driver: clean(row.DRIVER),
+    acceptedBy: clean(row.DelAcceptedBy),
+    trackingNo: clean(row.Ship_TrackingNo),
+  };
 }
