@@ -225,25 +225,39 @@ export interface PrimeRxDelivery {
   trackingNo: string | null;
 }
 
-export async function getDeliveryForRx(
+export interface PrimeRxFillDelivery extends PrimeRxDelivery {
+  refillNo: number;
+}
+
+/**
+ * Deliveries for every fill of an Rx, keyed by refill number.
+ *
+ * A prescription is NOT delivered to one fixed place: refills routinely go to
+ * different addresses (one Rx in this data has six refills across five
+ * addresses, and patients carry up to eight). So the address belongs to the
+ * FILL, never to the prescription — callers must match on refill number rather
+ * than taking "the" address for an Rx.
+ */
+export async function getDeliveriesForRx(
   kind: DbKind,
   rxno: string,
-): Promise<PrimeRxDelivery | null> {
+): Promise<Map<number, PrimeRxFillDelivery>> {
   const pool = await getMssqlPool(kind);
   const r = (await pool
     .request()
     .input("rx", rxno)
     .query(
-      `SELECT TOP 1
+      `SELECT d.RefillNo,
               o.DelPatRecId, o.PATIENTADDRESS, o.DelInstructions, o.ReqDelDate,
               ISNULL(d.DateDelivered, o.DateDelivered) AS DateDelivered,
               o.DRIVER, o.DelAcceptedBy, o.Ship_TrackingNo
          FROM DELIVERY_DETAIL d
          JOIN DELIVERY_ORDER o ON o.DelPatRecId = d.DelPatRecId
         WHERE d.RxNo = @rx
-        ORDER BY ISNULL(d.DateDelivered, o.ReqDelDate) DESC`,
+        ORDER BY d.RefillNo ASC, ISNULL(d.DateDelivered, o.ReqDelDate) ASC`,
     )) as {
     recordset: Array<{
+      RefillNo: number | string | null;
       DelPatRecId: number;
       PATIENTADDRESS: string | null;
       DelInstructions: string | null;
@@ -254,21 +268,34 @@ export async function getDeliveryForRx(
       Ship_TrackingNo: string | null;
     }>;
   };
-  const row = r.recordset[0];
-  if (!row) return null;
+
   const clean = (v: string | null) => {
     const t = (v ?? "").trim();
     return t.length > 0 ? t : null;
   };
-  return {
-    orderId: row.DelPatRecId,
-    // Stored as "STREET,,CITY,ST,ZIP" — tidy the doubled/edge commas.
-    address: clean(row.PATIENTADDRESS)?.replace(/\s*,\s*/g, ", ").replace(/(,\s*)+/g, ", ").replace(/^,\s*|,\s*$/g, "") ?? null,
-    instructions: clean(row.DelInstructions),
-    requestedDate: row.ReqDelDate,
-    deliveredDate: row.DateDelivered,
-    driver: clean(row.DRIVER),
-    acceptedBy: clean(row.DelAcceptedBy),
-    trackingNo: clean(row.Ship_TrackingNo),
-  };
+
+  const byRefill = new Map<number, PrimeRxFillDelivery>();
+  for (const row of r.recordset) {
+    const refillNo = Number(row.RefillNo ?? 0);
+    if (Number.isNaN(refillNo)) continue;
+    // Ordered ascending by date, so a later row for the same refill is the
+    // more recent attempt and should win.
+    byRefill.set(refillNo, {
+      refillNo,
+      orderId: row.DelPatRecId,
+      // Stored as "STREET,,CITY,ST,ZIP" — tidy the doubled/edge commas.
+      address:
+        clean(row.PATIENTADDRESS)
+          ?.replace(/\s*,\s*/g, ", ")
+          .replace(/(,\s*)+/g, ", ")
+          .replace(/^,\s*|,\s*$/g, "") ?? null,
+      instructions: clean(row.DelInstructions),
+      requestedDate: row.ReqDelDate,
+      deliveredDate: row.DateDelivered,
+      driver: clean(row.DRIVER),
+      acceptedBy: clean(row.DelAcceptedBy),
+      trackingNo: clean(row.Ship_TrackingNo),
+    });
+  }
+  return byRefill;
 }

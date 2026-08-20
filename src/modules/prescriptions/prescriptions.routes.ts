@@ -40,18 +40,18 @@ const RxListItemSchema = z.object({
   is340b: z.boolean(),
 });
 
+const DeliverySchema = z.object({
+  address: z.string().nullable(),
+  instructions: z.string().nullable(),
+  requestedDate: z.string().nullable(),
+  deliveredDate: z.string().nullable(),
+  driver: z.string().nullable(),
+  trackingNo: z.string().nullable(),
+});
+
 const RxDetailResponse = z.object({
   rx: RxListItemSchema,
-  delivery: z
-    .object({
-      address: z.string().nullable(),
-      instructions: z.string().nullable(),
-      requestedDate: z.string().nullable(),
-      deliveredDate: z.string().nullable(),
-      driver: z.string().nullable(),
-      trackingNo: z.string().nullable(),
-    })
-    .nullable(),
+  delivery: DeliverySchema.nullable(),
   prescriber: z
     .object({
       presno: z.number().int(),
@@ -74,6 +74,7 @@ const RxDetailResponse = z.object({
       pickupTime: z.string().nullable(),
       dispensed: z.boolean(),
       filedReason: z.string().nullable(),
+      delivery: DeliverySchema.nullable(),
     }),
   ),
   pendingRefillRequest: z

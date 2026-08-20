@@ -6,7 +6,7 @@
 // downstream. We never write to MSSQL from here.
 
 import {
-  getDeliveryForRx,
+  getDeliveriesForRx,
   getFiledDeferredReasons,
   getDrug,
   getPrescriber,
@@ -128,9 +128,32 @@ export interface DeliveryInfo {
   trackingNo: string | null;
 }
 
+function toDeliveryInfo(d: {
+  address: string | null;
+  instructions: string | null;
+  requestedDate: Date | null;
+  deliveredDate: Date | null;
+  driver: string | null;
+  trackingNo: string | null;
+} | undefined): DeliveryInfo | null {
+  if (!d) return null;
+  return {
+    address: d.address,
+    instructions: d.instructions,
+    requestedDate: d.requestedDate ? d.requestedDate.toISOString() : null,
+    deliveredDate: d.deliveredDate ? d.deliveredDate.toISOString() : null,
+    driver: d.driver,
+    trackingNo: d.trackingNo,
+  };
+}
+
 export interface RxDetail {
   rx: RxListItem;
-  /** Where the last delivery of this Rx went. Null if never delivered. */
+  /**
+   * Delivery for the CURRENT (latest) fill only. Refills can each go somewhere
+   * different, so this is not "the address for this prescription" — per-fill
+   * addresses live on `history`.
+   */
   delivery: DeliveryInfo | null;
   prescriber: PrimeRxPrescriber | null;
   history: Array<{
@@ -143,6 +166,8 @@ export interface RxDetail {
     pickupTime: string | null;
     dispensed: boolean;
     filedReason: string | null;
+    /** Where THIS fill went, when it was delivered. */
+    delivery: DeliveryInfo | null;
   }>;
   pendingRefillRequest: {
     id: string;
@@ -165,7 +190,7 @@ export async function getPrescriptionDetail(
     claim.presno !== null ? getPrescriber(kind, claim.presno) : Promise.resolve(null),
     getPrescriptionHistory(kind, patientno, rxno),
     getFiledDeferredReasons(kind),
-    getDeliveryForRx(kind, rxno),
+    getDeliveriesForRx(kind, rxno),
   ]);
 
   // Surface any open refill request the user has for this Rx so the UI
@@ -175,16 +200,7 @@ export async function getPrescriptionDetail(
 
   return {
     rx: claimToListItem(claim, kind, drug, reasons),
-    delivery: delivery
-      ? {
-          address: delivery.address,
-          instructions: delivery.instructions,
-          requestedDate: delivery.requestedDate ? delivery.requestedDate.toISOString() : null,
-          deliveredDate: delivery.deliveredDate ? delivery.deliveredDate.toISOString() : null,
-          driver: delivery.driver,
-          trackingNo: delivery.trackingNo,
-        }
-      : null,
+    delivery: toDeliveryInfo(delivery.get(claim.refillNo)),
     prescriber,
     history: history.map((h) => ({
       refillNo: h.refillNo,
@@ -194,6 +210,7 @@ export async function getPrescriptionDetail(
       pickupDate: h.pickupDate ? h.pickupDate.toISOString() : null,
       handoff: h.handoff,
       pickupTime: h.pickupTime,
+      delivery: toDeliveryInfo(delivery.get(h.refillNo)),
       dispensed: (h.status ?? "").trim().toUpperCase() !== "F",
       filedReason: h.filedReasonId != null ? (reasons.get(h.filedReasonId) ?? null) : null,
     })),
