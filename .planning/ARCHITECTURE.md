@@ -1,5 +1,9 @@
 # Architecture
 
+> **Reading PrimeRX?** See [`primerx-data-map.md`](./primerx-data-map.md) — what each
+> MSSQL table/column actually means, verified against the PrimeRX client UI, plus the
+> tables that look useful but are dead. Read it before deriving anything from CLAIMS.
+
 ## Goals
 
 1. **Customer-facing only** — patient/portal endpoints. Pharmacy and clinician
