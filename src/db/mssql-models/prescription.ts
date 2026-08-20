@@ -47,18 +47,24 @@ function moneyStr(v: string | number | null | undefined): string | null {
   return String(v);
 }
 
-// PrimeRX records the handover on the fill itself: PICKUPFROM='DEL' (plus the
-// DELIVERY flag) means a driver took it to the patient; anything else that was
-// picked up was collected at the counter. Rows that were never handed over
-// (STATUS 'F') have no pickup date and report null.
+// PrimeRX records the handover on the fill itself. The audit trail on a real Rx
+// shows the lifecycle: DELIVERY is set to 'D' when the fill is queued onto a
+// delivery run, then flips to 'Y' at the same moment PICKEDUP goes N->Y and
+// PICKUPFROM becomes 'DEL'. So:
+//   PICKEDUP='Y'            -> already handed over (delivered vs collected)
+//   DELIVERY='D', not yet   -> on a delivery run but not delivered
+//   otherwise               -> nothing to report
 function handoffOf(r: {
   PICKEDUP: string | null;
   PICKUPFROM: string | null;
   DELIVERY: string | null;
-}): "delivered" | "picked_up" | null {
-  if ((r.PICKEDUP ?? "").trim().toUpperCase() !== "Y") return null;
+}): "delivered" | "picked_up" | "awaiting_delivery" | null {
   const from = (r.PICKUPFROM ?? "").trim().toUpperCase();
   const del = (r.DELIVERY ?? "").trim().toUpperCase();
+  if ((r.PICKEDUP ?? "").trim().toUpperCase() !== "Y") {
+    // Queued for delivery but not handed over yet.
+    return del === "D" ? "awaiting_delivery" : null;
+  }
   if (from === "DEL" || ["Y", "D", "S"].includes(del)) return "delivered";
   return "picked_up";
 }

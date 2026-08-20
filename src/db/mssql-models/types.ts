@@ -78,7 +78,7 @@ export interface PrimeRxClaim {
   pickedUp: boolean;
   pickupDate: Date | null;
   /** How the patient actually received it: delivered, collected in store, or not yet. */
-  handoff: "delivered" | "picked_up" | null;
+  handoff: "delivered" | "picked_up" | "awaiting_delivery" | null;
   /** Set when STATUS='F' (filed/deferred): why it was never dispensed. */
   filedReasonId: number | null;
   /** Local time-of-day string PrimeRX records with the pickup/delivery. */

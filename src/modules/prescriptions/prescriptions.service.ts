@@ -34,7 +34,7 @@ export interface RxListItem {
   lastFilledAt: string | null;   // ISO date
   pickedUp: boolean;
   pickupDate: string | null;
-  handoff: "delivered" | "picked_up" | null;
+  handoff: "delivered" | "picked_up" | "awaiting_delivery" | null;
   /** Time of day PrimeRX recorded for the pickup/delivery, when present. */
   pickupTime: string | null;
   /** False when PrimeRX filed/deferred this fill instead of dispensing it. */
@@ -162,7 +162,7 @@ export interface RxDetail {
     qtyDispensed: number | null;
     pickedUp: boolean;
     pickupDate: string | null;
-    handoff: "delivered" | "picked_up" | null;
+    handoff: "delivered" | "picked_up" | "awaiting_delivery" | null;
     pickupTime: string | null;
     dispensed: boolean;
     filedReason: string | null;
