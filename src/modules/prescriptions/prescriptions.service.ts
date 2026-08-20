@@ -67,6 +67,37 @@ export async function listPrescriptions(kind: DbKind, patientno: number): Promis
   return claims.map((c, i) => claimToListItem(c, kind, drugs[i] ?? null));
 }
 
+export interface PatientLink {
+  dbKind: DbKind;
+  patientno: number;
+}
+
+/**
+ * Prescriptions across EVERY database the user is linked to. A patient present
+ * in both PrimeRX DBs may have all their Rx in one of them (e.g. nothing in
+ * 340B, everything in Conventional), so reading only the primary link silently
+ * shows an empty list. Newest fill first.
+ */
+export async function listPrescriptionsAcross(links: PatientLink[]): Promise<RxListItem[]> {
+  const perDb = await Promise.all(links.map((l) => listPrescriptions(l.dbKind, l.patientno)));
+  return perDb.flat().sort((a, b) => (b.lastFilledAt ?? "").localeCompare(a.lastFilledAt ?? ""));
+}
+
+/**
+ * Which linked record actually holds this RXNO. RXNO is only unique within a
+ * database, so detail/refill routes must resolve it before querying.
+ */
+export async function resolveRxLink(
+  links: PatientLink[],
+  rxno: string,
+): Promise<PatientLink> {
+  for (const l of links) {
+    const claim = await getPrescription(l.dbKind, l.patientno, rxno);
+    if (claim) return l;
+  }
+  throw new HttpError(404, "prescription_not_found");
+}
+
 export interface RxDetail {
   rx: RxListItem;
   prescriber: PrimeRxPrescriber | null;

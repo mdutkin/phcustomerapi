@@ -6,10 +6,11 @@
 
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
 import { z } from "zod";
-import { requirePatientLink } from "../patients/patients.service";
+import { requirePatientLinks } from "../patients/patients.service";
 import {
   getPrescriptionDetail,
-  listPrescriptions,
+  listPrescriptionsAcross,
+  resolveRxLink,
   queueRefillRequest,
 } from "./prescriptions.service";
 import { recordAudit } from "@/lib/audit";
@@ -75,14 +76,17 @@ export const prescriptionRoutes: FastifyPluginAsyncZod = async (app) => {
     },
   }, async (req) => {
     const userId = req.user.sub;
-    const link = await requirePatientLink(userId);
-    const items = await listPrescriptions(link.dbKind, link.patientno);
+    const links = await requirePatientLinks(userId);
+    const items = await listPrescriptionsAcross(links);
 
     await recordAudit(req, {
       action: "prescriptions.list",
       resourceType: "prescription",
       subjectUserId: userId,
-      metadata: { dbKind: link.dbKind, patientno: link.patientno, count: items.length },
+      metadata: {
+        links: links.map((l) => `${l.dbKind}:${l.patientno}`).join(","),
+        count: items.length,
+      },
     });
 
     return { items };
@@ -97,7 +101,8 @@ export const prescriptionRoutes: FastifyPluginAsyncZod = async (app) => {
     },
   }, async (req) => {
     const userId = req.user.sub;
-    const link = await requirePatientLink(userId);
+    const links = await requirePatientLinks(userId);
+    const link = await resolveRxLink(links, req.params.rxno);
     const detail = await getPrescriptionDetail(userId, link.dbKind, link.patientno, req.params.rxno);
 
     await recordAudit(req, {
@@ -146,7 +151,8 @@ export const prescriptionRoutes: FastifyPluginAsyncZod = async (app) => {
     },
   }, async (req, reply) => {
     const userId = req.user.sub;
-    const link = await requirePatientLink(userId);
+    const links = await requirePatientLinks(userId);
+    const link = await resolveRxLink(links, req.params.rxno);
     const { id } = await queueRefillRequest({
       userId,
       kind: link.dbKind,

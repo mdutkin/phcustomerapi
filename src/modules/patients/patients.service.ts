@@ -91,6 +91,31 @@ export async function getMeForUser(userId: string): Promise<MeResult> {
  * has not yet claimed a patient record. Used by Rx, deliveries, and
  * billing endpoints that need a patient identity.
  */
+/**
+ * ALL PrimeRX records this user has claimed. The same human commonly exists in
+ * both databases (340B + Conventional) under different PATIENTNOs, and their
+ * prescriptions may live in either — so anything reading Rx data must span
+ * every link, not just the primary one. Primary comes first.
+ */
+export async function requirePatientLinks(userId: string): Promise<
+  Array<{ dbKind: DbKind; patientno: number }>
+> {
+  const links = await db
+    .select()
+    .from(userPatients)
+    .where(eq(userPatients.userId, userId));
+  if (links.length === 0) {
+    throw new HttpError(
+      409,
+      "patient_not_linked",
+      "This account is not yet linked to a patient record. Run the self-claim flow.",
+    );
+  }
+  return [...links]
+    .sort((a, b) => Number(b.isPrimary) - Number(a.isPrimary))
+    .map((l) => ({ dbKind: l.dbKind, patientno: l.patientno }));
+}
+
 export async function requirePatientLink(userId: string): Promise<{
   dbKind: DbKind;
   patientno: number;
