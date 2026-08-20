@@ -32,6 +32,7 @@ export interface RxListItem {
   lastFilledAt: string | null;   // ISO date
   pickedUp: boolean;
   pickupDate: string | null;
+  handoff: "delivered" | "picked_up" | null;
   is340b: boolean;
 }
 
@@ -52,6 +53,7 @@ function claimToListItem(c: PrimeRxClaim, kind: DbKind, drug: PrimeRxDrug | null
     lastFilledAt: c.dateFilled ? c.dateFilled.toISOString().slice(0, 10) : null,
     pickedUp: c.pickedUp,
     pickupDate: c.pickupDate ? c.pickupDate.toISOString() : null,
+    handoff: c.handoff,
     is340b: c.is340b,
   };
 }
@@ -107,6 +109,7 @@ export interface RxDetail {
     qtyDispensed: number | null;
     pickedUp: boolean;
     pickupDate: string | null;
+    handoff: "delivered" | "picked_up" | null;
   }>;
   pendingRefillRequest: {
     id: string;
@@ -144,6 +147,7 @@ export async function getPrescriptionDetail(
       qtyDispensed: h.qtyDispensed,
       pickedUp: h.pickedUp,
       pickupDate: h.pickupDate ? h.pickupDate.toISOString() : null,
+      handoff: h.handoff,
     })),
     pendingRefillRequest: pending
       ? {

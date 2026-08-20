@@ -27,6 +27,7 @@ interface ClaimRow {
   SIGLINES: string | null;
   PICKEDUP: string | null;
   PICKUPDATE: Date | null;
+  PICKUPFROM: string | null;
   TOTAMT: string | number | null;
   COPAY: string | number | null;
   IS340B: boolean | null;
@@ -42,6 +43,22 @@ function num(v: string | number | null | undefined): number | null {
 function moneyStr(v: string | number | null | undefined): string | null {
   if (v === null || v === undefined) return null;
   return String(v);
+}
+
+// PrimeRX records the handover on the fill itself: PICKUPFROM='DEL' (plus the
+// DELIVERY flag) means a driver took it to the patient; anything else that was
+// picked up was collected at the counter. Rows that were never handed over
+// (STATUS 'F') have no pickup date and report null.
+function handoffOf(r: {
+  PICKEDUP: string | null;
+  PICKUPFROM: string | null;
+  DELIVERY: string | null;
+}): "delivered" | "picked_up" | null {
+  if ((r.PICKEDUP ?? "").trim().toUpperCase() !== "Y") return null;
+  const from = (r.PICKUPFROM ?? "").trim().toUpperCase();
+  const del = (r.DELIVERY ?? "").trim().toUpperCase();
+  if (from === "DEL" || ["Y", "D", "S"].includes(del)) return "delivered";
+  return "picked_up";
 }
 
 function rowToClaim(r: ClaimRow): PrimeRxClaim {
@@ -63,6 +80,7 @@ function rowToClaim(r: ClaimRow): PrimeRxClaim {
     sigLines: r.SIGLINES?.trim() || null,
     pickedUp: (r.PICKEDUP ?? "").trim().toUpperCase() === "Y",
     pickupDate: r.PICKUPDATE,
+    handoff: handoffOf(r),
     totalAmount: moneyStr(r.TOTAMT),
     copay: moneyStr(r.COPAY),
     is340b: !!r.IS340B,
@@ -75,7 +93,7 @@ const SELECT_COLS = `
   NDC, DRGNAME, STATUS,
   DATEO, DATEF, DAYS, QTY_ORD, QUANT,
   SIG, SIGLINES,
-  PICKEDUP, PICKUPDATE,
+  PICKEDUP, PICKUPDATE, PICKUPFROM,
   TOTAMT, COPAY, IS340B, DELIVERY
 `;
 

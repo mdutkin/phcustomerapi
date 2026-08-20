@@ -33,6 +33,7 @@ const RxListItemSchema = z.object({
   lastFilledAt: z.string().nullable(),
   pickedUp: z.boolean(),
   pickupDate: z.string().nullable(),
+  handoff: z.enum(["delivered", "picked_up"]).nullable(),
   is340b: z.boolean(),
 });
 
@@ -56,6 +57,7 @@ const RxDetailResponse = z.object({
       qtyDispensed: z.number().nullable(),
       pickedUp: z.boolean(),
       pickupDate: z.string().nullable(),
+      handoff: z.enum(["delivered", "picked_up"]).nullable(),
     }),
   ),
   pendingRefillRequest: z

@@ -77,6 +77,8 @@ export interface PrimeRxClaim {
   sigLines: string | null;
   pickedUp: boolean;
   pickupDate: Date | null;
+  /** How the patient actually received it: delivered, collected in store, or not yet. */
+  handoff: "delivered" | "picked_up" | null;
   totalAmount: string | null;  // money — keep as string for precision
   copay: string | null;
   is340b: boolean;
