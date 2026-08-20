@@ -78,7 +78,10 @@ function rowToClaim(r: ClaimRow): PrimeRxClaim {
     daysSupply: r.DAYS ? Number(r.DAYS) : null,
     qtyOrdered: num(r.QTY_ORD),
     qtyDispensed: num(r.QUANT),
-    sig: r.SIG?.trim() || null,
+    // SIG is often a pharmacist shorthand code ("T1TPOQD"); SIGLINES carries the
+    // expansion PrimeRX shows on screen ("TAKE 1 TABLET BY MOUTH DAILY"), and is
+    // populated on all but 16 of 2.2M rows. Patients get the readable one.
+    sig: r.SIGLINES?.trim() || r.SIG?.trim() || null,
     sigLines: r.SIGLINES?.trim() || null,
     pickedUp: (r.PICKEDUP ?? "").trim().toUpperCase() === "Y",
     pickupDate: r.PICKUPDATE,
