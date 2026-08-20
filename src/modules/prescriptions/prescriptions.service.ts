@@ -6,6 +6,7 @@
 // downstream. We never write to MSSQL from here.
 
 import {
+  getFiledDeferredReasons,
   getDrug,
   getPrescriber,
   getPrescription,
@@ -33,10 +34,19 @@ export interface RxListItem {
   pickedUp: boolean;
   pickupDate: string | null;
   handoff: "delivered" | "picked_up" | null;
+  /** False when PrimeRX filed/deferred this fill instead of dispensing it. */
+  dispensed: boolean;
+  /** Why it was filed/deferred, when the pharmacy recorded a reason. */
+  filedReason: string | null;
   is340b: boolean;
 }
 
-function claimToListItem(c: PrimeRxClaim, kind: DbKind, drug: PrimeRxDrug | null): RxListItem {
+function claimToListItem(
+  c: PrimeRxClaim,
+  kind: DbKind,
+  drug: PrimeRxDrug | null,
+  reasons?: Map<number, string>,
+): RxListItem {
   return {
     rxno: c.rxno,
     dbKind: kind,
@@ -54,6 +64,10 @@ function claimToListItem(c: PrimeRxClaim, kind: DbKind, drug: PrimeRxDrug | null
     pickedUp: c.pickedUp,
     pickupDate: c.pickupDate ? c.pickupDate.toISOString() : null,
     handoff: c.handoff,
+    // 'F' = filed/deferred: on file, never handed to the patient.
+    dispensed: (c.status ?? "").trim().toUpperCase() !== "F",
+    filedReason:
+      c.filedReasonId != null ? (reasons?.get(c.filedReasonId) ?? null) : null,
     is340b: c.is340b,
   };
 }
@@ -63,10 +77,11 @@ export async function listPrescriptions(kind: DbKind, patientno: number): Promis
   // Hydrate drugs in parallel — most patients have a handful of distinct
   // NDCs, so a per-row fetch is fine for now. Optimise to batch SELECT
   // IN (...) when this list grows.
-  const drugs = await Promise.all(
-    claims.map((c) => (c.ndc ? getDrug(kind, c.ndc) : Promise.resolve(null))),
-  );
-  return claims.map((c, i) => claimToListItem(c, kind, drugs[i] ?? null));
+  const [drugs, reasons] = await Promise.all([
+    Promise.all(claims.map((c) => (c.ndc ? getDrug(kind, c.ndc) : Promise.resolve(null)))),
+    getFiledDeferredReasons(kind),
+  ]);
+  return claims.map((c, i) => claimToListItem(c, kind, drugs[i] ?? null, reasons));
 }
 
 export interface PatientLink {
@@ -110,6 +125,8 @@ export interface RxDetail {
     pickedUp: boolean;
     pickupDate: string | null;
     handoff: "delivered" | "picked_up" | null;
+    dispensed: boolean;
+    filedReason: string | null;
   }>;
   pendingRefillRequest: {
     id: string;
@@ -127,10 +144,11 @@ export async function getPrescriptionDetail(
   const claim = await getPrescription(kind, patientno, rxno);
   if (!claim) throw new HttpError(404, "prescription_not_found");
 
-  const [drug, prescriber, history] = await Promise.all([
+  const [drug, prescriber, history, reasons] = await Promise.all([
     claim.ndc ? getDrug(kind, claim.ndc) : Promise.resolve(null),
     claim.presno !== null ? getPrescriber(kind, claim.presno) : Promise.resolve(null),
     getPrescriptionHistory(kind, patientno, rxno),
+    getFiledDeferredReasons(kind),
   ]);
 
   // Surface any open refill request the user has for this Rx so the UI
@@ -139,7 +157,7 @@ export async function getPrescriptionDetail(
   const pending = await findOpenCommand(userId, "refill_request", rxno);
 
   return {
-    rx: claimToListItem(claim, kind, drug),
+    rx: claimToListItem(claim, kind, drug, reasons),
     prescriber,
     history: history.map((h) => ({
       refillNo: h.refillNo,
@@ -148,6 +166,8 @@ export async function getPrescriptionDetail(
       pickedUp: h.pickedUp,
       pickupDate: h.pickupDate ? h.pickupDate.toISOString() : null,
       handoff: h.handoff,
+      dispensed: (h.status ?? "").trim().toUpperCase() !== "F",
+      filedReason: h.filedReasonId != null ? (reasons.get(h.filedReasonId) ?? null) : null,
     })),
     pendingRefillRequest: pending
       ? {

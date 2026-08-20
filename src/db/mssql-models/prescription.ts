@@ -28,6 +28,7 @@ interface ClaimRow {
   PICKEDUP: string | null;
   PICKUPDATE: Date | null;
   PICKUPFROM: string | null;
+  FiledDeferredReasonID: number | null;
   TOTAMT: string | number | null;
   COPAY: string | number | null;
   IS340B: boolean | null;
@@ -81,6 +82,7 @@ function rowToClaim(r: ClaimRow): PrimeRxClaim {
     pickedUp: (r.PICKEDUP ?? "").trim().toUpperCase() === "Y",
     pickupDate: r.PICKUPDATE,
     handoff: handoffOf(r),
+    filedReasonId: r.FiledDeferredReasonID ?? null,
     totalAmount: moneyStr(r.TOTAMT),
     copay: moneyStr(r.COPAY),
     is340b: !!r.IS340B,
@@ -93,7 +95,7 @@ const SELECT_COLS = `
   NDC, DRGNAME, STATUS,
   DATEO, DATEF, DAYS, QTY_ORD, QUANT,
   SIG, SIGLINES,
-  PICKEDUP, PICKUPDATE, PICKUPFROM,
+  PICKEDUP, PICKUPDATE, PICKUPFROM, FiledDeferredReasonID,
   TOTAMT, COPAY, IS340B, DELIVERY
 `;
 
@@ -171,4 +173,31 @@ export async function getPrescriptionHistory(
         ORDER BY NREFILL ASC`,
     )) as { recordset: IRecordSet<ClaimRow> };
   return r.recordset.map(rowToClaim);
+}
+
+
+// ─── Filed/Deferred reasons ─────────────────────────────────────────────────
+//
+// STATUS='F' means the prescription is ON FILE but was never dispensed — the
+// pharmacy parked it. FiledDeferredReason explains why (PA REQD, REFILL TOO
+// SOON, PT REJECTED, ...). It's a tiny static lookup, so cache it per database
+// rather than joining it onto every claim query.
+
+const reasonCache = new Map<DbKind, Map<number, string>>();
+
+export async function getFiledDeferredReasons(kind: DbKind): Promise<Map<number, string>> {
+  const cached = reasonCache.get(kind);
+  if (cached) return cached;
+  const pool = await getMssqlPool(kind);
+  const r = (await pool
+    .request()
+    .query("SELECT FiledDeferredReasonID, Name FROM FiledDeferredReason")) as {
+    recordset: Array<{ FiledDeferredReasonID: number; Name: string | null }>;
+  };
+  const map = new Map<number, string>();
+  for (const row of r.recordset) {
+    if (row.Name) map.set(row.FiledDeferredReasonID, row.Name.trim());
+  }
+  reasonCache.set(kind, map);
+  return map;
 }

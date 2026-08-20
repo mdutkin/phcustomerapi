@@ -34,6 +34,8 @@ const RxListItemSchema = z.object({
   pickedUp: z.boolean(),
   pickupDate: z.string().nullable(),
   handoff: z.enum(["delivered", "picked_up"]).nullable(),
+  dispensed: z.boolean(),
+  filedReason: z.string().nullable(),
   is340b: z.boolean(),
 });
 
@@ -58,6 +60,8 @@ const RxDetailResponse = z.object({
       pickedUp: z.boolean(),
       pickupDate: z.string().nullable(),
       handoff: z.enum(["delivered", "picked_up"]).nullable(),
+      dispensed: z.boolean(),
+      filedReason: z.string().nullable(),
     }),
   ),
   pendingRefillRequest: z

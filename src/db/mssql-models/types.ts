@@ -79,6 +79,8 @@ export interface PrimeRxClaim {
   pickupDate: Date | null;
   /** How the patient actually received it: delivered, collected in store, or not yet. */
   handoff: "delivered" | "picked_up" | null;
+  /** Set when STATUS='F' (filed/deferred): why it was never dispensed. */
+  filedReasonId: number | null;
   totalAmount: string | null;  // money — keep as string for precision
   copay: string | null;
   is340b: boolean;
