@@ -390,3 +390,19 @@ resolve it — we were showing a bare "AM".
 > passwords in **plaintext**, and they are nearly all `1234`. We only read this
 > table for the name column. Worth raising with the PrimeRX vendor; nothing we can
 > fix from our side.
+
+### Return to Stock / unpicked Rxs (confirmed from the UI, 2026-08-26)
+The operational screen behind "Rx(s) Ready" and "Unpicked Rxs Over 14 Days".
+Filter is *"Only Rxs Unpicked for Over N Days"* + a fill-date range; every listed
+row shows `B.St = B` (billed) and unpicked — **which is exactly how we derive
+`ready_for_pickup`**, so our definition matches theirs in kind (if not in exact
+window). Staff actions: Send Pickup Reminder · Print Return Label · Reverse Rx(s)
+(reverse the insurance claim when stock goes back) · Remove Rx · File Rx.
+
+Not readable from our side:
+- `RxReturnToStockLog` has **1 row** and `Reminder` / `TaskReminderLogs` 1 each, so
+  **"Send Pickup Reminder" leaves no usable trail** — we cannot tell whether a
+  patient has already been reminded. Our "Ready for pickup" is therefore
+  complementary, not duplicative, but we also can't coordinate with it.
+- `RXNOTES` is empty; the screen's "Rx Notes" free text ("08/25 LM", "08/26 Deliv",
+  "08/17 wait") lives elsewhere and was not located.
