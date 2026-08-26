@@ -330,3 +330,42 @@ lists orders whose prescriptions are ready to go out.
 - Other columns map to `TotalCopay` (money due on delivery), `DelInstructions`,
   and the patient's `MobileNo`/ZIP. Staff actions: Get Undelivered, Edit Delivery
   Information, Add Orders Manually, **Finalize Orders**.
+
+### Rx Refill Queue → `RXREFQUE` (confirmed from the UI, 2026-08-26)
+The busiest lane: `RXREFQUE` holds exactly **1,140** rows, matching the Live
+Workflow "Refill Queue" count and the `Rfq:1140` status-bar figure.
+`RXREFQUEDEL` (78,585) is the processed/removed history.
+
+Columns: `RXNO, DATE_QUED, TIME_QUED, PHARMACIST, SENTBYPROG, REFDUEDATE, REMARK,
+VOICE, STATUS, INS, ID, Delivery, RefDueCalcMethod, ContextId, ExternalStatus,
+PCSYNCH`. Queue spans 2025-06-03 → 2026-08-25 (items sit for a long time).
+
+**`SENTBYPROG` is the request SOURCE** — it drives the screen's tabs:
+`All | Pharmacist | IVR System | FillMyRefills.com | PrimeWeb-Refill Req. |
+PrimeWeb-Discontinue Req.`
+
+> 🔑 **Every row — 1,140 live and 78,585 historical — is `SENTBYPROG='PH'`
+> (Pharmacist).** `ContextId`, `ExternalStatus` and `VOICE` are NULL on all of
+> them. Medico has never used the IVR, FillMyRefills or PrimeWeb channels.
+
+Two consequences, and they shape the whole staff-console question:
+
+1. **Refills here are pharmacy-initiated, not patient-initiated.** Staff work
+   proactively from refills-due (`Add (R)efs Due`, `Add Expired Refills`), rather
+   than reacting to patient requests. So a patient-initiated refill is genuinely
+   NEW inbound work with no existing home in their day — it is not simply a case
+   of routing into a lane they already watch.
+2. **PrimeRX does support external refill sources** (FillMyRefills.com is a
+   third-party service, and `SENTBYPROG` + `ContextId`/`ExternalStatus` exist to
+   carry them). We are read-only on MSSQL and must not write, but this is worth
+   raising with the vendor: if there's a supported way to submit a refill request
+   with our own source code, patient requests would land in the queue staff
+   already work, instead of a second console they must remember to check.
+
+The refill→prescriber loop is now fully mapped:
+```
+RXREFQUE (refill queue)  --"Send Refill Request"-->  EREQUEST MSGTYPE=REFREQ
+   -> ERx Action List, TRANSSTAT='' (Awaiting Response)
+   -> prescriber authorises -> NEW RXNO created (e.g. 5001272 -> 5002619)
+   -> CLAIMS row -> fill -> delivery/pickup
+```
