@@ -209,3 +209,54 @@ Decisions that came out of the above and should not be silently reverted:
   the pharmacy faxes a Refill Request naming the **old** RXNO and the prescriber
   authorises a **new** one ✅ (5001272 → 5002619). Chaining these generations into a
   single medication history is a good future feature.
+
+---
+
+## 8. Queues & workflow (partially mapped — 2026-08-26)
+
+PrimeRX ships a configurable workflow engine, and Medico has defined two
+workflows (`WF_Workflow`): **"MEDICO WORKFLOW"** (2019) and "MEDICO WF 2" (2021).
+
+**States** (`WF_State`, ordered per workflow by `WF_QueueOrder.SerialNo`):
+
+```
+main line   START → DATA ENTRY → PV1 → DRUG PICK VERIFICATION → PRINT LABEL
+            → PV2 → DISPATCHER → WAITING BIN / DELIVER BIN → COMPLETED
+exceptions  CALL PATIENT · CALL DOCTOR · REFILL TOO SOON · PRIOR AUTH QUEUE
+            · (OOS) OUT OF STOCK · HOLD RX/WAITING FOR OTHER RX · CHEMO TECH
+```
+
+`PV1`/`PV2` and `DRUG PICK VERIFICATION` line up with the Verifications block on
+the Track Rx tab (`DrugPickVarifLog`, `PharmVerifLog`), so those states are real
+and exercised.
+
+Other queue machinery, with live row counts:
+
+| Table | Rows | What it is |
+|---|---|---|
+| `RefDueView` / `RefDueRep` | 1,878 / 2,501 | **Refills due** — RXNO, last fill, `Duedate`, `DaysRemaining`, `QtyRemaining`. The pharmacy's own version of the "needs a refill" calculation our portal derives from days-supply. |
+| `EREQUEST` | 40,545 | Electronic prescriber requests. `MSGTYPE='REFREQ'` = refill request sent to the doctor — the electronic sibling of the faxed Refill Request. |
+| `PRESMSG` | 110,531 | Prescriber messaging |
+| `MessagingQueue` (+`MessagedQueueDetail`, `…History`) | 567 / 82k / 59k | Messaging — relevant if we ever do patient↔pharmacy chat |
+| `LabelQueue` | 11 | Live label-print queue |
+| `TM_Task`, `TM_Queue*` | ~1 | Task management (barely used) |
+| `MO_QueueCodeLookup` | 26 | Status codes for partner workflows (`Abarca`, `APS`) — e.g. IN PROGRESS, BILLED, READY FOR SHIPPING, DELIVERED; APS adds Profile Review, Pharmacist Verification, Prior Auth-ish lanes |
+| `IntakeQueue` | **0** | Schema exists (BatchId, QueueId, RxNo, MORxStatus, ExpectedPickupTime, Priority, FullfillmentStatus) but is EMPTY |
+
+### ⚠️ The open question
+`CLAIMS` has **no workflow/state column**, and `IntakeQueue` is empty — so from the
+database alone we cannot tell **which queues Medico actually works day to day**
+versus which are configured-but-unused. `WF_*` is configuration; the runtime
+linkage was not located. Resolve this from the PrimeRX UI (queue screens with
+live counts) before designing the staff console.
+
+### Design implication for the patient portal
+We are read-only on MSSQL, so patient requests can never be written into these
+queues. But two things follow:
+- **Speak their vocabulary.** Our `command_queue` should map onto states staff
+  already recognise (CALL PATIENT, REFILL TOO SOON, PRIOR AUTH QUEUE) rather than
+  inventing a parallel taxonomy.
+- **Auto-reconcile instead of double-handling.** When a pharmacist actions a
+  refill in PrimeRX a new `CLAIMS` row appears (and `EREQUEST`/`RefDueView` move).
+  Our queue item can close itself off that signal, so staff never have to mark
+  anything done twice in a second system.
