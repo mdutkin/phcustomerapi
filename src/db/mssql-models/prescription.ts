@@ -47,26 +47,40 @@ function moneyStr(v: string | number | null | undefined): string | null {
   return String(v);
 }
 
-// PrimeRX records the handover on the fill itself. The audit trail on a real Rx
-// shows the lifecycle: DELIVERY is set to 'D' when the fill is queued onto a
-// delivery run, then flips to 'Y' at the same moment PICKEDUP goes N->Y and
-// PICKUPFROM becomes 'DEL'. So:
-//   PICKEDUP='Y'            -> already handed over (delivered vs collected)
-//   DELIVERY='D', not yet   -> on a delivery run but not delivered
-//   otherwise               -> nothing to report
+// PrimeRX records the handover on the fill itself. The Track Rx audit shows the
+// lifecycle: DELIVERY is set to 'D' when the fill joins a delivery run, then
+// flips to 'Y' at the same moment PICKEDUP goes N->Y and PICKUPFROM becomes
+// 'DEL'. A billed fill that is neither collected nor on a run is sitting on the
+// shelf waiting — PrimeRX's own Live Workflow panel counts exactly that as
+// "Rx(s) Ready".
+//
+// IMPORTANT: PICKEDUP is only reliably populated on recent records (~1.99M
+// historical CLAIMS rows have it NULL), so "waiting" is bounded by fill date.
+// Without that bound every ancient claim would look like it was ready for
+// collection. PrimeRX bounds its own panel with a From: date for the same reason.
+const READY_WINDOW_DAYS = 30;
+
 function handoffOf(r: {
   PICKEDUP: string | null;
   PICKUPFROM: string | null;
   DELIVERY: string | null;
-}): "delivered" | "picked_up" | "awaiting_delivery" | null {
+  STATUS: string | null;
+  DATEF: Date | null;
+}): "delivered" | "picked_up" | "awaiting_delivery" | "ready_for_pickup" | null {
   const from = (r.PICKUPFROM ?? "").trim().toUpperCase();
   const del = (r.DELIVERY ?? "").trim().toUpperCase();
-  if ((r.PICKEDUP ?? "").trim().toUpperCase() !== "Y") {
-    // Queued for delivery but not handed over yet.
-    return del === "D" ? "awaiting_delivery" : null;
+  if ((r.PICKEDUP ?? "").trim().toUpperCase() === "Y") {
+    if (from === "DEL" || ["Y", "D", "S"].includes(del)) return "delivered";
+    return "picked_up";
   }
-  if (from === "DEL" || ["Y", "D", "S"].includes(del)) return "delivered";
-  return "picked_up";
+  // Not handed over yet.
+  if (del === "D") return "awaiting_delivery";
+  const billed = (r.STATUS ?? "").trim().toUpperCase() === "B";
+  const filled = r.DATEF ? r.DATEF.getTime() : null;
+  const recent =
+    filled !== null && Date.now() - filled <= READY_WINDOW_DAYS * 86_400_000;
+  if (billed && recent) return "ready_for_pickup";
+  return null;
 }
 
 function rowToClaim(r: ClaimRow): PrimeRxClaim {

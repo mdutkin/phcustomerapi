@@ -260,3 +260,33 @@ queues. But two things follow:
   refill in PrimeRX a new `CLAIMS` row appears (and `EREQUEST`/`RefDueView` move).
   Our queue item can close itself off that signal, so staff never have to mark
   anything done twice in a second system.
+
+### Live Workflow panel (confirmed from the UI, 2026-08-26)
+PrimeRX's "Live Workflow" side panel is the queue view staff actually work, and
+every count on it maps to a column in **`LiveWorkflow_Counter`** — a cached
+counter row per `StationId` (36 here), refreshed periodically (`LastUpdate`):
+
+| Panel | Column | Seen |
+|---|---|---|
+| Intake · ERx / Doc Queue / **Refill Queue** | `INewRxCount` / `IDocQueueCount` / **`IRphCount`** | 0 / 0 / **1140** |
+| Billing · Unbilled / PA Queue / DUR-DDI / Refill Too Soon | `BUnbilledCount` / `BRejQueue1Count` / `BRejQueue2Count` / `BRejQueue3Count` | 0 / 0 / 1 / 0 |
+| Verification · Drug Pick / RPH | `VDrugPickVerifCount` / `VRPHVerifCount` | 6 / 6 |
+| Pickup · **Rx(s) Ready** / Delivery Bin / **In Transit** / Unpicked >14d | `PAllUnpickBilledCount` / `PTotalDeliverBinCount` / `PInTransit` / `PUnpickedover14Days{Billed,Unbilled}Count` | 11 / 16 / 302 / 8+3 |
+
+So the workflow IS actively worked (the earlier doubt is resolved), and the
+refill queue is the busiest lane by far.
+
+⚠️ **Our derived states approximate these counts but do NOT replicate them.**
+Over the last 30 days of fills we derive ready_for_pickup=6 (panel: 11) and
+awaiting_delivery=56 (panel: Delivery Bin 16 / In Transit 302) — different
+windows and extra criteria we haven't reverse-engineered. Consequences:
+- For per-patient status this is fine, and we bias conservative: we only say
+  "Ready for pickup" for a billed, uncollected fill that is NOT on a delivery
+  run. A false negative is silence; a false positive sends a patient to the
+  pharmacy for nothing.
+- **A staff console must READ `LiveWorkflow_Counter` rather than recompute**, or
+  staff will see two different numbers for the same queue and stop trusting ours.
+
+`PICKEDUP` is only reliably populated on recent rows (~1.99M historical CLAIMS
+have it NULL), so anything "waiting" MUST be date-bounded — PrimeRX bounds its own
+panel with a `From:` date for the same reason.
