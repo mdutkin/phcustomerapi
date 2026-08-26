@@ -428,3 +428,48 @@ under a newer Rx reports absurd values (-230, -192, -165 days for our test
 patient). Unfiltered, we'd tell someone they ran out eight months ago of
 something they collected last month. Filtered to current meds, the same patient
 shows a truthful picture: 3 due today, 4 overdue by 34–62 days.
+
+### What actually happens when an Rx is queued for refill (read-only investigation, 2026-08-26)
+
+**No triggers exist on `RXREFQUE`**, so queuing does not silently cascade. (`CLAIMS`
+by contrast carries 13 triggers — bucket inventory, `TRG_Claims_WF_Transition_UPD`
+for workflow transitions, ERx fill-indicator maintenance — but those fire on fills,
+not on queueing.)
+
+Ten procedures reference `RXREFQUE`. The three that write it:
+
+| Procedure | Writes | Stamps `SENTBYPROG` |
+|---|---|---|
+| `usp_SaveRxRefQueRefill` | `RXREFQUE` only (reads `CLAIMS` + `RefDueView`) | `OB` |
+| `usp_SaveRefillRequest` | `RXREFQUE` + `FMRPatRxRequest` | `FR` |
+| `usp_ProcessCallResponse` (IVR) | `RXREFQUE` + `RefillAuthActivityLog` + `MessagingQueueHistory` | — |
+
+`usp_SaveRxRefQueRefill` is the minimal path: it upserts one row per RXNO (dedupe
+by RXNO — the same shape as our own `command_queue` dedupe), pulling `REFDUEDATE`
+straight from `RefDueView` and `INS` from the latest `CLAIMS` row. Nothing else is
+touched.
+
+**Who queues:** every one of the 1,140 live rows has `PHARMACIST='MMS'` and
+`SENTBYPROG='PH'` — a system account, not named staff. Combined with the screen's
+`Add (R)efs Due` / `Add Expired Refills` buttons, the queue is bulk-populated from
+refills-due and then worked, rather than hand-added per prescription.
+
+> 🔑 **`usp_SaveRefillRequest` is a vendor-provided intake for external refill
+> requests** — effectively a patient-portal API. Its 25 parameters are exactly what
+> a portal holds:
+> `NPINO, FName, LName, DOB, Phone, Mobile, Email, CallBackNo, DeliveryMethod,
+> PickUpDate, PickUpTime, RefillConfirmation, RefillReminder, UserStatus,
+> AddressLine1, AddressLine2, City, State, Zip, SentBy, ContextId, RxListTABLE,
+> PatientNo, ExternalStatus, Remark`
+>
+> Note `SentBy` (our own source code), `ContextId`/`ExternalStatus` (the
+> external-system hooks that sit NULL in `RXREFQUE`), `RxListTABLE` (a table-valued
+> list of prescriptions), and full delivery preferences. `FMRPatRxRequest` — the
+> companion request log — exists with the matching columns and is **empty (0 rows)**
+> at Medico, i.e. the channel is wired but unused here.
+>
+> This is the supported path we hypothesised. Calling a vendor procedure is a
+> different proposition from writing tables directly, but it is still a write to
+> MSSQL: **confirm with the PrimeRX vendor before using it.** If blessed, patient
+> refill requests would land in the Refill Queue staff already work, tagged with our
+> own source, instead of a separate console.
