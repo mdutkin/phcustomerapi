@@ -322,3 +322,60 @@ export async function getDeliveriesForRx(
   }
   return byRefill;
 }
+
+
+// ─── Renewal requests to the prescriber ─────────────────────────────────────
+//
+// When an Rx runs out of refills the pharmacy sends the prescriber a REFREQ
+// (PrimeRX's "ERx Action List"; blank TRANSSTAT = "Awaiting Response"). Telling
+// the patient "we've already asked your doctor" is the missing half of the
+// no-refills-left story.
+//
+// ⚠️ TRANSSTAT is only closed out when staff action the row, so OLD blank rows
+// are stale, not pending: our test patient has REFREQs from January and March
+// still marked blank even though both were renewed into new Rx numbers. PrimeRX
+// works around this by filtering its own screen to recently-received messages —
+// we bound the window for the same reason. Showing a months-old "awaiting" would
+// be actively misleading.
+const RENEWAL_PENDING_DAYS = 45;
+
+export interface PendingRenewal {
+  rxno: string;
+  sentAt: Date;
+  prescriberName: string | null;
+}
+
+export async function getPendingRenewals(
+  kind: DbKind,
+  patientno: number,
+): Promise<Map<string, PendingRenewal>> {
+  const pool = await getMssqlPool(kind);
+  const r = (await pool
+    .request()
+    .input("p", patientno)
+    .input("days", RENEWAL_PENDING_DAYS)
+    .query(
+      `SELECT RXNO, SENTDTTIME, PRSFNAME, PRSLNAME
+         FROM EREQUEST
+        WHERE PATIENTNO = @p
+          AND LTRIM(RTRIM(ISNULL(MSGTYPE, ''))) = 'REFREQ'
+          AND LTRIM(RTRIM(ISNULL(TRANSSTAT, ''))) = ''
+          AND SENTDTTIME >= DATEADD(day, -@days, GETDATE())
+        ORDER BY SENTDTTIME DESC`,
+    )) as {
+    recordset: Array<{
+      RXNO: string | null;
+      SENTDTTIME: Date | null;
+      PRSFNAME: string | null;
+      PRSLNAME: string | null;
+    }>;
+  };
+  const out = new Map<string, PendingRenewal>();
+  for (const row of r.recordset) {
+    const rxno = (row.RXNO ?? "").trim();
+    if (!rxno || !row.SENTDTTIME || out.has(rxno)) continue;
+    const name = [row.PRSFNAME, row.PRSLNAME].map((x) => (x ?? "").trim()).filter(Boolean).join(" ");
+    out.set(rxno, { rxno, sentAt: row.SENTDTTIME, prescriberName: name || null });
+  }
+  return out;
+}

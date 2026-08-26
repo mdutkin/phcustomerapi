@@ -290,3 +290,24 @@ windows and extra criteria we haven't reverse-engineered. Consequences:
 `PICKEDUP` is only reliably populated on recent rows (~1.99M historical CLAIMS
 have it NULL), so anything "waiting" MUST be date-bounded — PrimeRX bounds its own
 panel with a `From:` date for the same reason.
+
+### ERx Action List → `EREQUEST` (confirmed from the UI, 2026-08-26)
+The ERx Action List is the prescriber-messaging queue. Reconciled exactly against
+a screenshot: the 6 rows shown are the REFREQs with **blank `TRANSSTAT`**, and a
+7th (older) row is excluded by the screen's `From Date Received` filter.
+
+| Column | Values |
+|---|---|
+| `MSGTYPE` | `RXFill` 20,924 · **`REFREQ`** 16,225 (refill request to prescriber) · `CANRES` 3,373 · `RXCHG` 22 |
+| `TRANSSTAT` | **`''` = Awaiting Response** · `C` closed 32,367 · `E` 5,851 · `I` 2,022 |
+
+This is the other half of the refill story: when an Rx runs out of refills the
+pharmacy sends a REFREQ and waits on the doctor. Surfaced to patients as
+"Renewal requested" instead of a bare "No refills left".
+
+⚠️ **`TRANSSTAT` is only closed when staff action the row, so old blank rows are
+STALE, not pending.** Our test patient has REFREQs from January and March still
+blank although both were renewed into new Rx numbers (5001271→, 5001272→5002619).
+PrimeRX copes by filtering its own screen to recently-received messages; we bound
+ours to 45 days for the same reason. An unbounded read would tell patients their
+doctor has been sitting on a request for seven months.

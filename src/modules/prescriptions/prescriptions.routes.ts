@@ -37,6 +37,7 @@ const RxListItemSchema = z.object({
   pickupTime: z.string().nullable(),
   dispensed: z.boolean(),
   filedReason: z.string().nullable(),
+  renewalRequestedAt: z.string().nullable(),
   is340b: z.boolean(),
 });
 
