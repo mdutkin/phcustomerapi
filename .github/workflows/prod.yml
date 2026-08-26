@@ -1,0 +1,125 @@
+name: DEPLOY
+
+# Source -> /opt/phcustomerapi on the CCCHC box, then restart the systemd unit.
+#
+# The service runs from SOURCE via tsx (`node_modules/.bin/tsx src/server.ts`),
+# not from a compiled dist/: the project uses `@/` path aliases and extensionless
+# imports that tsc does not rewrite, so `node dist/server.js` fails to resolve.
+# That means tsx (a devDependency) must be installed on the box.
+#
+# NOT DONE HERE ON PURPOSE:
+#   - no database migrations. Schema changes are applied deliberately by hand
+#     (`npm run db:migrate`), never automatically on push.
+#   - env files are never uploaded. Secrets live in /etc/phcustomerapi/api.env
+#     (root 0600) and /opt/phcustomerapi/.env.production.local on the box.
+
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci --include=dev
+
+      - name: Typecheck
+        env:
+          NODE_ENV: test
+        run: npm run typecheck
+
+      - name: Test
+        env:
+          NODE_ENV: test
+        run: npm test
+
+      # --delete keeps the box clean, but ONLY within the paths we own. Env files,
+      # node_modules and the previous src.bak.* snapshots live outside these
+      # transfers and are therefore untouched.
+      - name: rsync application source
+        uses: burnett01/rsync-deployments@7.1.0
+        with:
+          switches: -avzr --delete
+          path: src/
+          remote_path: /opt/phcustomerapi/src/
+          remote_host: medico-patients.tropa.io
+          remote_port: 22
+          remote_user: max
+          remote_key: ${{ secrets.SSH_PK }}
+
+      - name: rsync migrations
+        uses: burnett01/rsync-deployments@7.1.0
+        with:
+          switches: -avzr --delete
+          path: drizzle/
+          remote_path: /opt/phcustomerapi/drizzle/
+          remote_host: medico-patients.tropa.io
+          remote_port: 22
+          remote_user: max
+          remote_key: ${{ secrets.SSH_PK }}
+
+      - name: rsync manifests
+        uses: burnett01/rsync-deployments@7.1.0
+        with:
+          switches: -avz
+          path: package.json package-lock.json tsconfig.json drizzle.config.ts
+          remote_path: /opt/phcustomerapi/
+          remote_host: medico-patients.tropa.io
+          remote_port: 22
+          remote_user: max
+          remote_key: ${{ secrets.SSH_PK }}
+
+      # Only reinstall when the lockfile actually changed — npm ci wipes and
+      # rebuilds node_modules, which is slow and briefly leaves the app unable
+      # to start. The box's npm is configured with omit=dev globally, hence the
+      # explicit --include=dev (tsx is a devDependency and is required to run).
+      - name: Install dependencies on the server if the lockfile changed
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: medico-patients.tropa.io
+          port: 22
+          username: max
+          key: ${{ secrets.SSH_PK }}
+          script: |
+            set -e
+            cd /opt/phcustomerapi
+            sum=$(sha256sum package-lock.json | cut -d' ' -f1)
+            if [ ! -f .deployed-lock-sha ] || [ "$(cat .deployed-lock-sha)" != "$sum" ]; then
+              echo "lockfile changed — running npm ci"
+              npm ci --include=dev
+              echo "$sum" > .deployed-lock-sha
+            else
+              echo "lockfile unchanged — skipping install"
+            fi
+
+      - name: Restart API
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: medico-patients.tropa.io
+          port: 22
+          username: max
+          key: ${{ secrets.SSH_PK }}
+          script: |
+            set -e
+            sudo -n /usr/bin/systemctl restart phcustomerapi
+            sleep 5
+            sudo -n /usr/bin/systemctl is-active phcustomerapi
+
+      # Deep health hits Postgres AND both PrimeRX databases, so this catches a
+      # bad deploy or a dropped Cato tunnel rather than just "the port is open".
+      - name: Smoke test
+        run: |
+          sleep 3
+          body=$(curl -s --max-time 30 https://medico-patients.tropa.io/api/health/deep)
+          echo "$body"
+          echo "$body" | grep -q '"ok":true' || { echo "::error::deep health check failed"; exit 1; }
