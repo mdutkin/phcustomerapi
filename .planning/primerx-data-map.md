@@ -311,3 +311,22 @@ blank although both were renewed into new Rx numbers (5001271→, 5001272→5002
 PrimeRX copes by filtering its own screen to recently-received messages; we bound
 ours to 45 days for the same reason. An unbounded read would tell patients their
 doctor has been sitting on a request for seven months.
+
+### Delivery Queue screen (confirmed from the UI, 2026-08-26)
+The "PrimeRx - Delivery Queue" tab lists **Open Orders** from `DELIVERY_ORDER`,
+filtered by `ReqDelDate`. Reconciled against a screenshot (From 08/22 To 08/25):
+the DB has 15 orders in that window, all `DelStatus='O'`; the screen showed 9
+because **"Show verified Rx(s)" / "Show billed Rx(s)"** were ticked, i.e. it only
+lists orders whose prescriptions are ready to go out.
+
+- **`DelStatus`: `O` = Open** (7,377) — sitting in this queue; `C` = closed (15,409).
+  This is why `DelStatus` is useless as a "was it delivered" signal: staff deliver
+  without finalising, so orders stay Open indefinitely. Our test patient's
+  completed July deliveries are still `O`.
+- **`DeliveryMethod`: `D` = Delivery (20,589), `S` = Shipping (2,295)** — matches the
+  screen's colour legend (blue = delivery, orange = shipping, red = invalid address).
+- **`ReqDelDate` = the requested/promised delivery date** — the single most useful
+  field for a patient waiting on medication. Surfaced as "Expected <date>".
+- Other columns map to `TotalCopay` (money due on delivery), `DelInstructions`,
+  and the patient's `MobileNo`/ZIP. Staff actions: Get Undelivered, Edit Delivery
+  Information, Add Orders Manually, **Finalize Orders**.
