@@ -261,6 +261,31 @@ export interface PrimeRxFillDelivery extends PrimeRxDelivery {
  * FILL, never to the prescription — callers must match on refill number rather
  * than taking "the" address for an Rx.
  */
+// DELIVERY_ORDER.DRIVER holds an internal code ("AM"); DELIVERY_USER maps it to
+// a person ("JASMIN"). Showing patients the code is meaningless, so resolve it.
+// Tiny static table — cache per database.
+const driverCache = new Map<DbKind, Map<string, string>>();
+
+async function getDriverNames(kind: DbKind): Promise<Map<string, string>> {
+  const cached = driverCache.get(kind);
+  if (cached) return cached;
+  const pool = await getMssqlPool(kind);
+  const r = (await pool
+    .request()
+    .query("SELECT UserId, UserName FROM DELIVERY_USER")) as {
+    recordset: Array<{ UserId: string | null; UserName: string | null }>;
+  };
+  const map = new Map<string, string>();
+  for (const row of r.recordset) {
+    const id = (row.UserId ?? "").trim().toUpperCase();
+    const name = (row.UserName ?? "").trim();
+    // Skip the pharmacy's own account — it isn't a person delivering.
+    if (id && name && name.toUpperCase() !== "MEDICO PHARMACY") map.set(id, name);
+  }
+  driverCache.set(kind, map);
+  return map;
+}
+
 export async function getDeliveriesForRx(
   kind: DbKind,
   rxno: string,
@@ -297,6 +322,7 @@ export async function getDeliveriesForRx(
     return t.length > 0 ? t : null;
   };
 
+  const drivers = await getDriverNames(kind);
   const byRefill = new Map<number, PrimeRxFillDelivery>();
   for (const row of r.recordset) {
     const refillNo = Number(row.RefillNo ?? 0);
@@ -315,7 +341,11 @@ export async function getDeliveriesForRx(
       instructions: clean(row.DelInstructions),
       requestedDate: row.ReqDelDate,
       deliveredDate: row.DateDelivered,
-      driver: clean(row.DRIVER),
+      driver: (() => {
+        const code = clean(row.DRIVER);
+        if (!code) return null;
+        return drivers.get(code.toUpperCase()) ?? code;
+      })(),
       acceptedBy: clean(row.DelAcceptedBy),
       trackingNo: clean(row.Ship_TrackingNo),
     });

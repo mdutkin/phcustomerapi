@@ -369,3 +369,24 @@ RXREFQUE (refill queue)  --"Send Refill Request"-->  EREQUEST MSGTYPE=REFREQ
    -> prescriber authorises -> NEW RXNO created (e.g. 5001272 -> 5002619)
    -> CLAIMS row -> fill -> delivery/pickup
 ```
+
+### Delivery batches → `DELIVERY_BATCH` (confirmed from the UI, 2026-08-26)
+Batch No. format `BN` + `YYMMDD` + sequence. 10,191 rows.
+- `BatchStatus`: **`C` = Closed (10,129), `O` = Open (62)**. Unlike `DELIVERY_ORDER`,
+  batches DO get closed properly — the screen filtered to Open shows the ~62
+  stragglers, some abandoned since 2020.
+- `BATCHTYPE`: **`H` = Individual/home (8,943), `F` = Facility (1,248)** — the screen
+  renders these as INDIVIDUAL / FACILITY.
+- Money is tracked per batch: `TotalCopay` vs `TotalCopayCollected`.
+- `DelUserId` → `DELIVERY_USER`.
+
+### `DELIVERY_USER` — driver lookup
+Maps the delivery code to a person: `AM`→JASMIN, `GG`→ANI, `OR`→OZOD, `AR`→CARLOS,
+`HN`→HAMID, `DRV`→STEVE, plus a non-person `MP`→MEDICO PHARMACY (excluded when
+resolving). `DELIVERY_ORDER.DRIVER` holds the code, so patient-facing screens must
+resolve it — we were showing a bare "AM".
+
+> 🔒 **Security note (vendor system, not ours):** `DELIVERY_USER` stores driver
+> passwords in **plaintext**, and they are nearly all `1234`. We only read this
+> table for the name column. Worth raising with the PrimeRX vendor; nothing we can
+> fix from our side.
