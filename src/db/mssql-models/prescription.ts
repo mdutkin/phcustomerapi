@@ -409,3 +409,60 @@ export async function getPendingRenewals(
   }
   return out;
 }
+
+
+// ─── Refill due dates (the pharmacy's own calculation) ──────────────────────
+//
+// `RefDueView` is PrimeRX's authoritative "when is this due for a refill" view —
+// the same numbers staff see. It accounts for quantity remaining and pickup-based
+// thresholds, which a naive lastFilled + daysSupply does not, so deriving our own
+// invites the patient and the pharmacy disagreeing about a date.
+//
+// DaysRemaining is SIGNED: negative means the patient has already run out and is
+// that many days overdue. Our own calculation clamps at zero, which throws away
+// the single most useful adherence signal we have.
+//
+// Only prescriptions the pharmacy is tracking appear here, so treat it as
+// supplementary — never assume every Rx has a row. The view costs ~800ms, so
+// callers should run it alongside their other queries, not in series.
+
+export interface RefillDue {
+  rxno: string;
+  dueDate: Date | null;
+  daysRemaining: number | null;
+  qtyRemaining: number | null;
+}
+
+export async function getRefillDueInfo(
+  kind: DbKind,
+  patientno: number,
+): Promise<Map<string, RefillDue>> {
+  const pool = await getMssqlPool(kind);
+  const r = (await pool
+    .request()
+    .input("p", patientno)
+    .query(
+      `SELECT RXNO, Duedate, DaysRemaining, QtyRemaining
+         FROM RefDueView
+        WHERE PATIENTNO = @p`,
+    )) as {
+    recordset: Array<{
+      RXNO: string | null;
+      Duedate: Date | null;
+      DaysRemaining: number | null;
+      QtyRemaining: number | null;
+    }>;
+  };
+  const out = new Map<string, RefillDue>();
+  for (const row of r.recordset) {
+    const rxno = (row.RXNO ?? "").trim();
+    if (!rxno) continue;
+    out.set(rxno, {
+      rxno,
+      dueDate: row.Duedate ?? null,
+      daysRemaining: row.DaysRemaining ?? null,
+      qtyRemaining: row.QtyRemaining ?? null,
+    });
+  }
+  return out;
+}

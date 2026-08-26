@@ -38,6 +38,8 @@ const RxListItemSchema = z.object({
   dispensed: z.boolean(),
   filedReason: z.string().nullable(),
   renewalRequestedAt: z.string().nullable(),
+  refillDueDate: z.string().nullable(),
+  refillDaysRemaining: z.number().nullable(),
   is340b: z.boolean(),
 });
 

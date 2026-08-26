@@ -406,3 +406,25 @@ Not readable from our side:
   complementary, not duplicative, but we also can't coordinate with it.
 - `RXNOTES` is empty; the screen's "Rx Notes" free text ("08/25 LM", "08/26 Deliv",
   "08/17 wait") lives elsewhere and was not located.
+
+### `RefDueView` — the pharmacy's own refill-due dates (in use since 2026-08-26)
+PrimeRX computes, per Rx, when a refill is due and how far ahead/behind the
+patient is — the same numbers staff work from. We now read it rather than
+deriving our own from `lastFilled + daysSupply`, so a patient and the counter
+can't disagree about a date. It also accounts for quantity remaining and
+pickup-based thresholds, which our derivation cannot.
+
+- `Duedate` → the due date shown to the patient
+- **`DaysRemaining` is SIGNED** — negative means already run out by that many days.
+  Our own calculation clamps at zero, discarding the strongest adherence signal
+  available ("ran out 34 days ago" ≠ "time to reorder").
+- `QtyRemaining`, plus threshold/pickup-based variants we don't use yet.
+- Supplementary: only tracked prescriptions appear (16 of our test patient's 22).
+- Costs ~800ms — run it in parallel with the other per-patient queries.
+
+⚠️ **Scope overdue to CURRENT medication only.** The view keeps tracking
+superseded Rx numbers, so an old generation of a drug the patient still takes
+under a newer Rx reports absurd values (-230, -192, -165 days for our test
+patient). Unfiltered, we'd tell someone they ran out eight months ago of
+something they collected last month. Filtered to current meds, the same patient
+shows a truthful picture: 3 due today, 4 overdue by 34–62 days.
