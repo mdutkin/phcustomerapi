@@ -259,18 +259,10 @@ export async function queueRefillRequest(input: QueueRefillInput): Promise<{ id:
   const claim = await getPrescription(input.kind, input.patientno, input.rxno);
   if (!claim) throw new HttpError(404, "prescription_not_found");
 
-  // Controlled substances are never a self-service refill. CII carries no refills
-  // in law at all, and CIII-CV renewals require the prescriber to be contacted
-  // rather than a request sitting in a queue. Enforced here rather than only in
-  // the UI, because hiding a button is not a control.
-  const drug = claim.ndc ? await getDrug(input.kind, claim.ndc) : null;
-  if ((drug?.deaClass ?? 0) > 0) {
-    throw new HttpError(
-      409,
-      "controlled_substance",
-      "This is a controlled medication, so we can't take the request online. Please call the pharmacy and we'll contact your prescriber.",
-    );
-  }
+  // NOTE: an authorised refill is fine for ANY prescription, controlled or not —
+  // CIII-CV may carry up to five refills, and CII never has any to spend. The
+  // controlled-substance restriction belongs to RENEWAL (no refills left), where
+  // the prescriber has to be contacted, and is enforced there rather than here.
   if (claim.totalRefills > 0 && claim.refillNo >= claim.totalRefills) {
     throw new HttpError(409, "no_refills_remaining");
   }
