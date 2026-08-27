@@ -95,6 +95,31 @@ async function provisionUser(claims: {
     return { sub: existing.id, firebaseUid: claims.uid, phone: claims.phone, email: claims.email };
   }
 
+  // Same phone, new Firebase UID — re-bind rather than fail.
+  //
+  // A Firebase account can be recreated (the user deletes and re-registers, an
+  // admin removes it, or in dev the Auth emulator restarts and loses its store).
+  // The phone then arrives with a fresh uid while our users row still holds the
+  // old one, and inserting collides with the unique phone constraint — locking
+  // the person out of their own claimed patient record behind an opaque 401.
+  //
+  // Adopting the row is consistent with our identity model rather than a
+  // shortcut: a Firebase-verified phone IS our proof of possession, and it's the
+  // same standard we require to claim a patient in the first place. Whoever
+  // controls the number is the same person, so the links stay theirs.
+  if (claims.phone) {
+    const byPhone = (
+      await db.select().from(users).where(eq(users.phoneE164, claims.phone)).limit(1)
+    )[0];
+    if (byPhone) {
+      await db
+        .update(users)
+        .set({ firebaseUid: claims.uid, lastLoginAt: now })
+        .where(eq(users.id, byPhone.id));
+      return { sub: byPhone.id, firebaseUid: claims.uid, phone: claims.phone, email: claims.email };
+    }
+  }
+
   const [created] = await db
     .insert(users)
     .values({

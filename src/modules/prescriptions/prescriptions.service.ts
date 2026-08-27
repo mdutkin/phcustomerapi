@@ -39,6 +39,8 @@ export interface RxListItem {
   handoff: "delivered" | "picked_up" | "awaiting_delivery" | "ready_for_pickup" | null;
   /** Time of day PrimeRX recorded for the pickup/delivery, when present. */
   pickupTime: string | null;
+  /** DEA schedule: 0 = not controlled, 2..5 = CII..CV. */
+  deaClass: number;
   /** False when PrimeRX filed/deferred this fill instead of dispensing it. */
   dispensed: boolean;
   /** Why it was filed/deferred, when the pharmacy recorded a reason. */
@@ -79,6 +81,7 @@ function claimToListItem(
     handoff: c.handoff,
     pickupTime: c.pickupTime,
     // 'F' = filed/deferred: on file, never handed to the patient.
+    deaClass: drug?.deaClass ?? 0,
     dispensed: (c.status ?? "").trim().toUpperCase() !== "F",
     filedReason:
       c.filedReasonId != null ? (reasons?.get(c.filedReasonId) ?? null) : null,
@@ -255,6 +258,19 @@ export async function queueRefillRequest(input: QueueRefillInput): Promise<{ id:
   // job on a pharmacist's desk.
   const claim = await getPrescription(input.kind, input.patientno, input.rxno);
   if (!claim) throw new HttpError(404, "prescription_not_found");
+
+  // Controlled substances are never a self-service refill. CII carries no refills
+  // in law at all, and CIII-CV renewals require the prescriber to be contacted
+  // rather than a request sitting in a queue. Enforced here rather than only in
+  // the UI, because hiding a button is not a control.
+  const drug = claim.ndc ? await getDrug(input.kind, claim.ndc) : null;
+  if ((drug?.deaClass ?? 0) > 0) {
+    throw new HttpError(
+      409,
+      "controlled_substance",
+      "This is a controlled medication, so we can't take the request online. Please call the pharmacy and we'll contact your prescriber.",
+    );
+  }
   if (claim.totalRefills > 0 && claim.refillNo >= claim.totalRefills) {
     throw new HttpError(409, "no_refills_remaining");
   }

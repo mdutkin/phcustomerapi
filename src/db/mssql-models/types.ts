@@ -57,6 +57,8 @@ export interface PrimeRxDrug {
   form: string | null;
   strength: string | null;
   units: string | null;
+  /** DEA schedule: 0 = not controlled, 2..5 = CII..CV. */
+  deaClass: number;
 }
 
 export interface PrimeRxClaim {

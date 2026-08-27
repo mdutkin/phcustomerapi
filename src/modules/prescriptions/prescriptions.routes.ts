@@ -35,6 +35,7 @@ const RxListItemSchema = z.object({
   pickupDate: z.string().nullable(),
   handoff: z.enum(["delivered", "picked_up", "awaiting_delivery", "ready_for_pickup"]).nullable(),
   pickupTime: z.string().nullable(),
+  deaClass: z.number(),
   dispensed: z.boolean(),
   filedReason: z.string().nullable(),
   renewalRequestedAt: z.string().nullable(),
