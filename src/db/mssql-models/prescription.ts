@@ -426,11 +426,55 @@ export async function getPendingRenewals(
 // supplementary — never assume every Rx has a row. The view costs ~800ms, so
 // callers should run it alongside their other queries, not in series.
 
+/**
+ * PrimeRX's own refill-eligibility verdict, mirrored 1:1 from RefDueView.
+ *
+ * - `ok`          OKTOREFILL — the pharmacy would fill it today.
+ * - `too_early`   earlyforrefill — before the early-refill threshold. The store
+ *                 setting is DEF0001.REFDUEPERCENT (83% here): a 30-day supply
+ *                 becomes eligible 25 days after the fill. INSCAR.REFDUEPERCENT
+ *                 can override per plan (none set at Medico).
+ * - `no_qty`      NoQtyLeft — total authorised quantity consumed.
+ * - `expired`     Rx past its expiry (DATEO + INSCAR.MDREFILL days, 365 here).
+ * - `discontinued` ORDSTATUS = 'D'.
+ * - `transferred` STATUS = 'T' with transfers-not-refillable set (off here).
+ * - `controlled_not_refillable` CII (CONSTANT.CLASS2REFD = -1) or CIII–CV more
+ *                 than CLASS3/4/5REFD days (180) after the order date.
+ * - `filed`       STATUS = 'F' — never dispensed.
+ */
+export type RefillEligibility =
+  | "ok"
+  | "too_early"
+  | "no_qty"
+  | "expired"
+  | "discontinued"
+  | "transferred"
+  | "controlled_not_refillable"
+  | "filed";
+
 export interface RefillDue {
   rxno: string;
   dueDate: Date | null;
   daysRemaining: number | null;
   qtyRemaining: number | null;
+  /** First day the pharmacy would actually fill it (threshold-adjusted). */
+  eligibleDate: Date | null;
+  expiryDate: Date | null;
+  eligibility: RefillEligibility | null;
+}
+
+function mapRefillStatus(raw: string | null): RefillEligibility | null {
+  switch ((raw ?? "").trim().toLowerCase()) {
+    case "oktorefill": return "ok";
+    case "earlyforrefill": return "too_early";
+    case "noqtyleft": return "no_qty";
+    case "expired": return "expired";
+    case "discontinued": return "discontinued";
+    case "transfered": return "transferred";
+    case "controlnotrefillable": return "controlled_not_refillable";
+    case "filedrx": return "filed";
+    default: return null;
+  }
 }
 
 export async function getRefillDueInfo(
@@ -442,7 +486,12 @@ export async function getRefillDueInfo(
     .request()
     .input("p", patientno)
     .query(
-      `SELECT RXNO, Duedate, DaysRemaining, QtyRemaining
+      // RefillStatusThreshold (not RefillStatus) is the verdict the pharmacy
+      // acts on: it applies the early-refill percentage. The PrimeRX "N Days
+      // Early" warning is the raw Duedate; the fill still goes through once the
+      // threshold date has passed.
+      `SELECT RXNO, Duedate, DaysRemaining, QtyRemaining,
+              DuedateByThreshold, ExpiryDate, RefillStatusThreshold
          FROM RefDueView
         WHERE PATIENTNO = @p`,
     )) as {
@@ -451,6 +500,9 @@ export async function getRefillDueInfo(
       Duedate: Date | null;
       DaysRemaining: number | null;
       QtyRemaining: number | null;
+      DuedateByThreshold: Date | null;
+      ExpiryDate: Date | null;
+      RefillStatusThreshold: string | null;
     }>;
   };
   const out = new Map<string, RefillDue>();
@@ -462,6 +514,9 @@ export async function getRefillDueInfo(
       dueDate: row.Duedate ?? null,
       daysRemaining: row.DaysRemaining ?? null,
       qtyRemaining: row.QtyRemaining ?? null,
+      eligibleDate: row.DuedateByThreshold ?? null,
+      expiryDate: row.ExpiryDate ?? null,
+      eligibility: mapRefillStatus(row.RefillStatusThreshold),
     });
   }
   return out;

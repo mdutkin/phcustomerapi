@@ -9,6 +9,8 @@ import {
   getDeliveriesForRx,
   getPendingRenewals,
   getRefillDueInfo,
+  type RefillDue,
+  type RefillEligibility,
   getFiledDeferredReasons,
   getDrug,
   getPrescriber,
@@ -51,6 +53,10 @@ export interface RxListItem {
   refillDueDate: string | null;
   /** Signed: negative means the patient ran out that many days ago. */
   refillDaysRemaining: number | null;
+  /** First day the pharmacy would fill a refill (early-refill threshold applied). */
+  refillEligibleDate: string | null;
+  /** The pharmacy's verdict on refilling today — see RefillEligibility. */
+  refillEligibility: RefillEligibility | null;
   is340b: boolean;
 }
 
@@ -60,7 +66,7 @@ function claimToListItem(
   drug: PrimeRxDrug | null,
   reasons?: Map<number, string>,
   renewals?: Map<string, { sentAt: Date }>,
-  due?: Map<string, { dueDate: Date | null; daysRemaining: number | null }>,
+  due?: Map<string, RefillDue>,
 ): RxListItem {
   return {
     rxno: c.rxno,
@@ -86,8 +92,12 @@ function claimToListItem(
     filedReason:
       c.filedReasonId != null ? (reasons?.get(c.filedReasonId) ?? null) : null,
     renewalRequestedAt: renewals?.get(c.rxno)?.sentAt.toISOString() ?? null,
-    refillDueDate: due?.get(c.rxno)?.dueDate?.toISOString() ?? null,
+    // Calendar dates (PrimeRX has no time on these) — ship as YYYY-MM-DD so the
+    // browser can't shift them a day by rendering midnight-UTC in local time.
+    refillDueDate: due?.get(c.rxno)?.dueDate?.toISOString().slice(0, 10) ?? null,
     refillDaysRemaining: due?.get(c.rxno)?.daysRemaining ?? null,
+    refillEligibleDate: due?.get(c.rxno)?.eligibleDate?.toISOString().slice(0, 10) ?? null,
+    refillEligibility: due?.get(c.rxno)?.eligibility ?? null,
     is340b: c.is340b,
   };
 }
@@ -265,6 +275,28 @@ export async function queueRefillRequest(input: QueueRefillInput): Promise<{ id:
   // the prescriber has to be contacted, and is enforced there rather than here.
   if (claim.totalRefills > 0 && claim.refillNo >= claim.totalRefills) {
     throw new HttpError(409, "no_refills_remaining");
+  }
+
+  // Apply the pharmacy's OWN eligibility verdict (RefDueView), so we never
+  // queue work the counter can't act on. "Too early" is the common one: the
+  // PrimeRX client itself warns "N Days Early For Refill" and insurance rejects
+  // early fills, so let the patient know when it opens up instead.
+  const due = (await getRefillDueInfo(input.kind, input.patientno)).get(input.rxno);
+  switch (due?.eligibility) {
+    case "too_early":
+      throw new HttpError(409, "refill_too_early", "It's too early to refill this prescription.", {
+        eligibleDate: due.eligibleDate?.toISOString().slice(0, 10) ?? null,
+      });
+    case "expired":
+      throw new HttpError(409, "prescription_expired");
+    case "discontinued":
+      throw new HttpError(409, "prescription_discontinued");
+    case "controlled_not_refillable":
+      throw new HttpError(409, "controlled_not_refillable");
+    case "no_qty":
+      throw new HttpError(409, "no_refills_remaining");
+    default:
+      break; // ok, filed, transferred, or not tracked — let the pharmacist decide
   }
 
   // Lands in the unified command queue; a pharmacist performs the refill in the

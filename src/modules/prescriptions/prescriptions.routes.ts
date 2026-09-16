@@ -41,6 +41,10 @@ const RxListItemSchema = z.object({
   renewalRequestedAt: z.string().nullable(),
   refillDueDate: z.string().nullable(),
   refillDaysRemaining: z.number().nullable(),
+  refillEligibleDate: z.string().nullable(),
+  refillEligibility: z
+    .enum(["ok", "too_early", "no_qty", "expired", "discontinued", "transferred", "controlled_not_refillable", "filed"])
+    .nullable(),
   is340b: z.boolean(),
 });
 

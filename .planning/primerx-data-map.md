@@ -45,7 +45,7 @@ The prescription list collapses to the latest `NREFILL` per `RXNO`.
 | `B` | 2,117,177 | **BILLED** — dispensed | ✅ Fill List prints "BILLED" + green badge |
 | `F` | 96,123 | **Filed / Deferred** — on file, never dispensed | ⚠️ inferred |
 | `U` | 1,439 | pre-billing (entered, not yet adjudicated) | ✅ audit shows `Rx Status: U → B` |
-| `T` | 2,523 | unknown — do not guess | ❌ |
+| `T` | 2,523 | **Transferred out** — `RefDueView`'s source reads `clm.STATUS = 'T'` as `IsTransfered`, gated by `DEF0001.ALLOWTRRXREF` (Y here, so transferred Rx are not blocked from refill) | ✅ (from view source, 2026-09-15) |
 
 `F` is **not** "failed". PrimeRX ships a `FiledDeferredReason` lookup:
 
@@ -194,6 +194,13 @@ documents: **Medico Pharmacy, 11779 Santa Monica Blvd, Los Angeles CA 90025,
 ---
 
 ## 7. Portal presentation rules
+
+**Dates are calendar dates, not instants.** PrimeRX stores fill/due/pickup/DOB with no time
+of day; the driver returns them as midnight **UTC**. `new Date("2026-08-26")` in a Los Angeles
+browser is 5pm on Aug 25, so every such date rendered a day early until 2026-09-15. Rule: the
+API ships calendar dates as `YYYY-MM-DD`, and the portal parses those (and midnight-UTC
+timestamps) as local calendar dates via `lib/dates.ts`. Never `new Date(iso)` an API date in
+the portal directly.
 
 Decisions that came out of the above and should not be silently reverted:
 
@@ -428,6 +435,54 @@ under a newer Rx reports absurd values (-230, -192, -165 days for our test
 patient). Unfiltered, we'd tell someone they ran out eight months ago of
 something they collected last month. Filtered to current meds, the same patient
 shows a truthful picture: 3 due today, 4 overdue by 34–62 days.
+
+#### Refill eligibility — the rule set behind "WARNING! 10 Days Early For Refill" (decoded 2026-09-15)
+Read from the view's definition (`sys.sql_modules`) and confirmed against the PrimeRX
+**Refill Options** dialog for Rx 5001991 (Tamsulosin, 30-day supply, filled 8/26, dialog
+on 9/15 said *10 Days Early*; `DaysRemaining` = 10 ✅).
+
+Two verdict columns, both with the same vocabulary; **use `RefillStatusThreshold`** —
+it's what the pharmacy acts on:
+
+| Value | Meaning | Source rule |
+|---|---|---|
+| `OKTOREFILL ` (trailing space!) | fill it today | none of the below |
+| `earlyforrefill` | too soon | `RefillStatus`: days since fill < `DAYS`. `RefillStatusThreshold`: days since fill < `CEILING(DAYS × REFDUEPERCENT/100)` |
+| `NoQtyLeft` | all authorised qty consumed | `QTY_ORD × (refills+1) − consumed ≤ 0` |
+| `Expired` | Rx expired | `RXINFO.RxExpires` or `DATEO + INSCAR.MDREFILL` days (365) |
+| `Discontinued` | | `CLAIMS.ORDSTATUS = 'D'` |
+| `Transfered` | | `STATUS = 'T'` and `ALLOWTRRXREF = 'N'` (off here → never emitted) |
+| `ControlNotRefillable` | | CII: `CONSTANT.CLASS2REFD = -1` → never. CIII–CV: > `CLASS3/4/5REFD` days (180) since order |
+| `FiledRx` | never dispensed | `STATUS = 'F'` |
+
+Precedence is the table order (Filed → Discontinued → Transferred → NoQty → Expired →
+early → controlled → OK).
+
+**Store settings involved** (identical in both DBs):
+- `DEF0001.REFDUEPERCENT = 83` → a 30-day supply is refillable from day 25 (`DuedateByThreshold`);
+  the dialog's *N Days Early* is the raw `Duedate` (day 30). 26 Rx are currently early by the
+  raw date but OK by threshold — staff fill those.
+- `INSCAR.REFDUEPERCENT` — per-plan override; all NULL/0 at Medico.
+- `CONSTANT.CLASS2REFD=-1, CLASS3/4/5REFD=180`.
+- `INSCAR.MDREFILL=365` — Rx lifetime.
+
+Columns worth reading: `Duedate`, `DuedateByThreshold`, `DaysRemaining`, `QtyRemaining`,
+`ExpiryDate`, `IsExpired`, `RefillStatusThreshold`. The `*ByPickup` / `*Equi*` variants
+re-run the same maths from the pickup date and across equivalent NDCs — not used.
+
+**Portal use:** exposed as `refillEligibility` + `refillEligibleDate`; the API refuses
+`refill_too_early` / `prescription_expired` / `prescription_discontinued` /
+`controlled_not_refillable` so no request lands on the counter that PrimeRX itself would
+refuse. Distribution today: 1,138 NoQtyLeft · 398 OK · 181 early · 113 Expired · 49 Discontinued.
+
+#### Pharmacist-side refill flow (from the Refill Options dialog, 2026-09-15)
+Refilling is NOT one click for staff. The dialog shows the early-refill warning and a
+**"Rxs with Equivalent Drugs"** grid (other Rx numbers for the same drug — the superseded
+generations we filter out of "current"), then on *Refill* PrimeRX prompts for a
+**replacement/equivalent NDC** (substitution or stock) and raises **DUR alerts**
+(`RXDUR` 2,725 rows / `RXDUR_Log`, `INTERACT` 224,849 — drug–drug interaction reference,
+`WARNING` 358). These are clinical decisions and stay with the pharmacist — the portal does
+not surface DUR content to patients; our queue only says *which* Rx the patient wants.
 
 ### What actually happens when an Rx is queued for refill (read-only investigation, 2026-08-26)
 
