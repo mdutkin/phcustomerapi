@@ -26,7 +26,6 @@ export interface PrimeRxPatient {
   primaryInsurance: string | null;
   primaryGroupNo: string | null;
   primaryMemberNo: string | null;
-  allergies: string | null;
   language: string | null;
 }
 

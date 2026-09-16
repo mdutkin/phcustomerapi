@@ -27,7 +27,7 @@ const PatientSchema = z.object({
   is340b: z.boolean(),
   active: z.boolean(),
   primaryInsurance: z.string().nullable(),
-  allergies: z.string().nullable(),
+  allergies: z.array(z.string()),
 });
 
 const MeResponse = z.object({
@@ -121,7 +121,7 @@ export const patientRoutes: FastifyPluginAsyncZod = async (app) => {
               is340b: out.patient.is340b,
               active: out.patient.active,
               primaryInsurance: out.patient.primaryInsurance,
-              allergies: out.patient.allergies,
+              allergies: out.allergies,
             }
           : null,
       addresses: out.addresses,
@@ -174,7 +174,7 @@ export const patientRoutes: FastifyPluginAsyncZod = async (app) => {
         is340b: result.patient.is340b,
         active: result.patient.active,
         primaryInsurance: result.patient.primaryInsurance,
-        allergies: result.patient.allergies,
+        allergies: [], // claim response is identity-only; /me carries the real list
       },
     };
   });

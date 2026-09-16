@@ -26,7 +26,6 @@ const SELECT_COLS = `
   primaryins,
   groupno1,
   medno1,
-  ALLERGY,
   LANGUAGE
 `;
 
@@ -50,7 +49,6 @@ interface PatientRow {
   primaryins: string | null;
   groupno1: string | null;
   medno1: string | null;
-  ALLERGY: string | null;
   LANGUAGE: string | null;
 }
 
@@ -75,7 +73,6 @@ function rowToPatient(r: PatientRow): PrimeRxPatient {
     primaryInsurance: r.primaryins?.trim() || null,
     primaryGroupNo: r.groupno1?.trim() || null,
     primaryMemberNo: r.medno1?.trim() || null,
-    allergies: r.ALLERGY?.trim() || null,
     language: r.LANGUAGE?.trim() || null,
   };
 }
@@ -194,4 +191,39 @@ export async function searchPatientForClaim(
   const first = r.recordset[0];
   if (!first) return null;
   return rowToPatient(first);
+}
+
+/**
+ * A patient's recorded allergies, as display names.
+ *
+ * `PATIENT.ALLERGY` is NOT free text — it's a code, and it is '0'/'00' ("NO
+ * KNOWN ALLERGIES") on every single patient, so it must never be rendered.
+ * The real list is `PATIENTALLERGY`, keyed by code type:
+ *   A = allergy class → `ALLERGY.NAME` (PENICILLINS, SULFA …)
+ *   D = a specific product → `DRUG` by NDC
+ * plus `PatientOtherAllergy` (type O) for free-text entries (SHELL FISH …).
+ * Code 0/00 under type A is the explicit "none" marker and is filtered out.
+ */
+export async function getPatientAllergies(kind: DbKind, patientno: number): Promise<string[]> {
+  const pool = await getMssqlPool(kind);
+  const r = (await pool
+    .request()
+    .input("p", patientno)
+    .query(
+      `SELECT name FROM (
+         SELECT CASE
+                  WHEN pa.CodeType = 'A' THEN RTRIM(a.NAME)
+                  WHEN pa.CodeType = 'D' THEN RTRIM(d.DRGNAME) + CASE WHEN RTRIM(d.STRONG) <> '' THEN ' ' + RTRIM(d.STRONG) ELSE '' END
+                END AS name
+           FROM PATIENTALLERGY pa
+           LEFT JOIN ALLERGY a ON pa.CodeType = 'A' AND RTRIM(a.ALLERGY_CD) = RTRIM(pa.AllergyCode)
+           LEFT JOIN DRUG d ON pa.CodeType = 'D' AND d.DRGNDC = RTRIM(pa.AllergyCode)
+          WHERE pa.PatientNo = @p
+            AND NOT (pa.CodeType = 'A' AND RTRIM(pa.AllergyCode) IN ('0', '00'))
+         UNION
+         SELECT RTRIM(o.Description) FROM PatientOtherAllergy o WHERE o.PatientNo = @p
+       ) x
+       WHERE name IS NOT NULL AND name <> '' AND UPPER(name) NOT LIKE 'NO KNOWN%'`,
+    )) as { recordset: Array<{ name: string }> };
+  return [...new Set(r.recordset.map((x) => x.name.trim()).filter(Boolean))];
 }

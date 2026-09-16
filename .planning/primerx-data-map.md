@@ -496,6 +496,28 @@ the label, so the portal's per-fill history may legitimately show the NDC change
 `DRUG.QNTHAND` is 0 on every equivalent NDC: PrimeRX inventory counts are NOT maintained here,
 so "on hand" can't drive any portal feature.
 
+**"Consolidated Clinical Checks"** (decoded 2026-09-15, Rx 5001991 refill). Three rows:
+*Dup. Therapy — TAMSULOSIN 8/26/2026* (the current fill of the SAME Rx — it's the early-refill
+fact in a clinical wrapper), *Drug-Drug Interaction SEV:4 Minor — BISOPROLOL 5MG* (the
+patient's other current med), *Adverse Drug Reaction — Severe* (the drug's own ADR profile;
+the patient has **no** recorded allergies, so it's not patient-specific).
+**These results are NOT reproducible from the database.** The local `INTERACT` table
+(224,849 pairs by `TXR1`/`TXR2` therapeutic code) uses a 0–3 severity scale and has no
+change dates, while the dialog says SEV 4 — the checks come from PrimeRX's cloud clinical
+service; the `DUR_*Result` tables (DDI, ADR, Allergy, Dose, Pregnancy …) are its intended
+landing zone and are all EMPTY here. What the DB does keep is the *override*: when the
+pharmacist proceeds, NCPDP DUR/PPS codes go on the claim → `RXDUR` (2,725 rows):
+`REASON_CD` (ER early refill · ID ingredient dup · TD therapeutic dup · DD drug-drug …),
+`PROFES_CD` (M0 prescriber consulted …), `RESULT_CD` (1G filled w/ prescriber approval …).
+Clinical content stays with the pharmacist; the portal never shows it.
+
+**Allergies — where they really live** (fixed 2026-09-15). `PATIENT.ALLERGY` is a CODE,
+not text: `'0'`/`'00'` = "NO KNOWN ALLERGIES" on **every** patient (42,067 rows), so rendering
+it printed "0" as an allergy. Real entries: `PATIENTALLERGY` (`CodeType A` → `ALLERGY.NAME`
+class list, e.g. 01 PENICILLINS; `CodeType D` → `DRUG` by NDC; 7,386 of 7,490 rows are the
+"none" marker) plus `PatientOtherAllergy` (`CodeType O`, free text: SHELL FISH, STEROIDS…).
+Read across both DBs and dedupe.
+
 ### What actually happens when an Rx is queued for refill (read-only investigation, 2026-08-26)
 
 **No triggers exist on `RXREFQUE`**, so queuing does not silently cascade. (`CLAIMS`

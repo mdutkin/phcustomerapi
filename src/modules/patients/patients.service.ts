@@ -9,7 +9,7 @@
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db/client";
 import { addresses, userPatients, users } from "@/db/schema";
-import { getPatient } from "@/db/mssql-models";
+import { getPatient, getPatientAllergies } from "@/db/mssql-models";
 import type { DbKind, PrimeRxPatient } from "@/db/mssql-models";
 import { HttpError } from "@/plugins/error-handler";
 
@@ -28,6 +28,8 @@ export interface MeResult {
       }
     | null;
   patient: PrimeRxPatient | null;
+  /** Recorded allergies across every linked PrimeRX record, deduped. */
+  allergies: string[];
   addresses: Array<{
     id: string;
     label: string;
@@ -53,8 +55,16 @@ export async function getMeForUser(userId: string): Promise<MeResult> {
   const primary = links.find((l) => l.isPrimary) ?? links[0] ?? null;
 
   let patient: PrimeRxPatient | null = null;
+  let allergies: string[] = [];
   if (primary) {
-    patient = await getPatient(primary.dbKind, primary.patientno);
+    // Allergies are read across ALL links: the same person exists in both
+    // PrimeRX databases and either record may hold the entry.
+    const [p, ...lists] = await Promise.all([
+      getPatient(primary.dbKind, primary.patientno),
+      ...links.map((l) => getPatientAllergies(l.dbKind, l.patientno)),
+    ]);
+    patient = p;
+    allergies = [...new Set(lists.flat())].sort();
   }
 
   const addressRows = await db
@@ -73,6 +83,7 @@ export async function getMeForUser(userId: string): Promise<MeResult> {
       ? { dbKind: primary.dbKind, patientno: primary.patientno, isPrimary: primary.isPrimary }
       : null,
     patient,
+    allergies,
     addresses: addressRows.map((a) => ({
       id: a.id,
       label: a.label,
