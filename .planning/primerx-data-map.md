@@ -518,6 +518,16 @@ class list, e.g. 01 PENICILLINS; `CodeType D` → `DRUG` by NDC; 7,386 of 7,490 
 "none" marker) plus `PatientOtherAllergy` (`CodeType O`, free text: SHELL FISH, STEROIDS…).
 Read across both DBs and dedupe.
 
+**Auto-refill consent — PrimeRX's own model (decoded 2026-09-16; correction to the "never
+switched on" note).** `Patient_Consent` (source 3 = Auto Refill, type 5 = Prescription Auto
+Refill Consent, status 9 Yes / 10 No, 365-day validity, `SignatureData` blob when signed on
+the pad, `OutReachMethod` 01/03, `SigneeName`, `RelationID` → `Consent_RelationShip`) is
+captured **daily** by staff (latest 2026-09-15). `Patient_PrescriptionConsent` links a consent
+to specific `RxNo`s and carries `ReplacedByRxNo`/`DateReplaced`. `ConsentTextVersion` holds
+the wording (ID 4). Execution engine (`AutoRefillRequestLog`) has never run — consent is
+collected, fills stay manual. ~205 due Rx carry live consent today. Full numbers in
+`TODO-medico-patients.md`.
+
 ### What actually happens when an Rx is queued for refill (read-only investigation, 2026-08-26)
 
 **No triggers exist on `RXREFQUE`**, so queuing does not silently cascade. (`CLAIMS`
