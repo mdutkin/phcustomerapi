@@ -484,6 +484,18 @@ generations we filter out of "current"), then on *Refill* PrimeRX prompts for a
 `WARNING` 358). These are clinical decisions and stay with the pharmacist — the portal does
 not surface DUR content to patients; our queue only says *which* Rx the patient wants.
 
+**"PREFERRED DRUGS AVAILABLE — would you like to replace?"** (decoded 2026-09-15). Not a
+clinical substitution — a *purchasing* one. `DRUG.IsPreferred` marks the NDC the pharmacy
+prefers to stock for a given product (`DRUG.TXRXCODE` groups equivalents, e.g.
+`05701000040000` = tamsulosin 0.4mg cap). Rx 5001991 is on `65862059801` (Aurobindo,
+100-ct); the preferred row is `65862059805` (same Aurobindo product, 500-ct package).
+`DEF0001.AutoReplacePrefDrugOnRefill = 'P'` = **Prompt** on every refill (Y would swap
+silently, N never asks); `preferredDrugOnEnterRx = 'Y'`, `ERXSelectPreferredDrug = 'Y'`.
+Same molecule, strength, form and manufacturer — invisible to the patient except the NDC on
+the label, so the portal's per-fill history may legitimately show the NDC change between fills.
+`DRUG.QNTHAND` is 0 on every equivalent NDC: PrimeRX inventory counts are NOT maintained here,
+so "on hand" can't drive any portal feature.
+
 ### What actually happens when an Rx is queued for refill (read-only investigation, 2026-08-26)
 
 **No triggers exist on `RXREFQUE`**, so queuing does not silently cascade. (`CLAIMS`
