@@ -81,6 +81,13 @@ const EnvSchema = z.object({
   FIREBASE_SERVICE_ACCOUNT_FILE: z.string().optional(),
   // Standard firebase-admin env var; presence routes the SDK at the emulator.
   FIREBASE_AUTH_EMULATOR_HOST: z.string().optional(),
+  // Staff (pharmacist/admin) tokens must carry a second factor. On in
+  // production (a staff account can read every patient); off in dev so the
+  // Auth emulator stays usable.
+  STAFF_REQUIRE_MFA: z
+    .enum(["true", "false"])
+    .default("false")
+    .transform((v) => v === "true"),
 
   CORS_ORIGINS: z
     .string()

@@ -18,6 +18,7 @@ import { requestRoutes } from "@/modules/requests/requests.routes";
 import { prescriptionRoutes } from "@/modules/prescriptions/prescriptions.routes";
 import { labRoutes } from "@/modules/labs/labs.routes";
 import { shopRoutes } from "@/modules/shop/shop.routes";
+import { staffRoutes } from "@/modules/staff/staff.routes";
 
 export async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify({
@@ -99,6 +100,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(prescriptionRoutes);
   await app.register(labRoutes);
   await app.register(shopRoutes);
+  await app.register(staffRoutes);
 
   return app;
 }
