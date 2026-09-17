@@ -15,6 +15,7 @@ import { db } from "@/db/client";
 import { users, userRoleEnum } from "@/db/schema";
 import { recordAudit } from "@/lib/audit";
 import { HttpError } from "@/plugins/error-handler";
+import { getWorklistSnapshot } from "./worklist.service";
 
 const roleSchema = z.enum(userRoleEnum.enumValues);
 const staffRoleSchema = z.enum(["pharmacist", "admin"]);
@@ -52,6 +53,93 @@ export const staffRoutes: FastifyPluginAsyncZod = async (app) => {
     role: req.user.role,
     mfa: req.user.mfa,
   }));
+
+  // The aggregated refill work list. Every read is PHI for many patients, so it
+  // is audit-logged with the filters used.
+  app.get("/staff/worklist", {
+    onRequest: [app.authenticate, app.requireRole("pharmacist", "admin")],
+    schema: {
+      tags: ["staff"],
+      summary: "Refill work list across both PrimeRX databases, one row per person",
+      querystring: z.object({
+        db: z.enum(["340b", "conventional", "both"]).default("both"),
+        consent: z.enum(["any", "yes", "no"]).default("any"),
+        ranOut: z.enum(["any", "yes"]).default("any"),
+        refresh: z.enum(["true", "false"]).default("false"),
+        limit: z.coerce.number().int().min(1).max(2000).default(500),
+      }),
+      response: {
+        200: z.object({
+          generatedAt: z.string(),
+          totals: z.object({
+            people: z.number(),
+            rx: z.number(),
+            withConsent: z.number(),
+            ranOut: z.number(),
+            byDb: z.record(z.object({ people: z.number(), rx: z.number() })),
+          }),
+          matched: z.number(),
+          people: z.array(
+            z.object({
+              key: z.string(),
+              lastName: z.string().nullable(),
+              firstName: z.string().nullable(),
+              dob: z.string().nullable(),
+              mobile: z.string().nullable(),
+              phone: z.string().nullable(),
+              languageNo: z.number().nullable(),
+              records: z.array(z.object({ db: z.enum(["340b", "conventional"]), patientno: z.number() })),
+              rxCount: z.number(),
+              consentCount: z.number(),
+              ranOutCount: z.number(),
+              mostOverdueDays: z.number(),
+              hasPortalRequest: z.boolean(),
+              priority: z.number(),
+              rx: z.array(
+                z.object({
+                  db: z.enum(["340b", "conventional"]),
+                  patientno: z.number(),
+                  rxno: z.string(),
+                  drugName: z.string().nullable(),
+                  drugStrength: z.string().nullable(),
+                  deaClass: z.number(),
+                  lastFilledAt: z.string().nullable(),
+                  daysSupply: z.number().nullable(),
+                  refillsRemaining: z.number(),
+                  daysRemaining: z.number().nullable(),
+                  dueDate: z.string().nullable(),
+                  consentUntil: z.string().nullable(),
+                  handoff: z.enum(["delivery", "pickup"]),
+                  inPrimeRxQueueSince: z.string().nullable(),
+                  portalRequestId: z.string().nullable(),
+                  portalRequestedAt: z.string().nullable(),
+                }),
+              ),
+            }),
+          ),
+        }),
+      },
+    },
+  }, async (req) => {
+    const q = req.query;
+    const snap = await getWorklistSnapshot({ refresh: q.refresh === "true" });
+    let people = snap.people;
+    if (q.db !== "both") {
+      // Keep the person, but only the Rx that live in the chosen database.
+      people = people
+        .map((p) => ({ ...p, rx: p.rx.filter((r) => r.db === q.db) }))
+        .filter((p) => p.rx.length > 0);
+    }
+    if (q.consent === "yes") people = people.filter((p) => p.rx.some((r) => r.consentUntil));
+    if (q.consent === "no") people = people.filter((p) => !p.rx.some((r) => r.consentUntil));
+    if (q.ranOut === "yes") people = people.filter((p) => p.rx.some((r) => (r.daysRemaining ?? 0) < 0));
+    await recordAudit(req, {
+      action: "staff.worklist.view",
+      resourceType: "worklist",
+      metadata: { db: q.db, consent: q.consent, ranOut: q.ranOut, matched: people.length },
+    });
+    return { generatedAt: snap.generatedAt, totals: snap.totals, matched: people.length, people: people.slice(0, q.limit) };
+  });
 
   // ─── /admin — admin only ────────────────────────────────────────────────
 

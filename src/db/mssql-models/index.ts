@@ -6,3 +6,4 @@ export * from "./prescriber";
 export * from "./drug";
 export * from "./prescription";
 export * from "./insurance";
+export * from "./worklist";
