@@ -16,6 +16,8 @@ import { users, userRoleEnum } from "@/db/schema";
 import { recordAudit } from "@/lib/audit";
 import { HttpError } from "@/plugins/error-handler";
 import { getWorklistSnapshot } from "./worklist.service";
+import { listStaffCommands, transitionCommand } from "./requests.service";
+import { commandStatusEnum, commandTypeEnum } from "@/db/schema";
 
 const roleSchema = z.enum(userRoleEnum.enumValues);
 const staffRoleSchema = z.enum(["pharmacist", "admin"]);
@@ -139,6 +141,72 @@ export const staffRoutes: FastifyPluginAsyncZod = async (app) => {
       metadata: { db: q.db, consent: q.consent, ranOut: q.ranOut, matched: people.length },
     });
     return { generatedAt: snap.generatedAt, totals: snap.totals, matched: people.length, people: people.slice(0, q.limit) };
+  });
+
+  // ─── Command queue (patient requests) ───────────────────────────────────
+
+  const staffCommand = z.object({
+    id: z.string().uuid(),
+    type: z.enum(commandTypeEnum.enumValues),
+    status: z.enum(commandStatusEnum.enumValues),
+    dbKind: z.enum(["340b", "conventional"]),
+    patientno: z.number(),
+    patient: z
+      .object({
+        lastName: z.string().nullable(),
+        firstName: z.string().nullable(),
+        dob: z.string().nullable(),
+        mobile: z.string().nullable(),
+      })
+      .nullable(),
+    requestedBy: z.object({ userId: z.string(), phoneE164: z.string().nullable(), email: z.string().nullable() }),
+    payload: z.record(z.unknown()),
+    patientNote: z.string().nullable(),
+    staffNote: z.string().nullable(),
+    requestedAt: z.string(),
+    claimedBy: z.string().nullable(),
+    claimedAt: z.string().nullable(),
+    completedBy: z.string().nullable(),
+    completedAt: z.string().nullable(),
+  });
+
+  app.get("/staff/requests", {
+    onRequest: [app.authenticate, app.requireRole("pharmacist", "admin")],
+    schema: {
+      tags: ["staff"],
+      summary: "Command queue — everything patients have asked the pharmacy to do",
+      querystring: z.object({
+        scope: z.enum(["open", "closed", "all"]).default("open"),
+        type: z.enum(commandTypeEnum.enumValues).optional(),
+        limit: z.coerce.number().int().min(1).max(500).default(200),
+      }),
+      response: { 200: z.object({ items: z.array(staffCommand) }) },
+    },
+  }, async (req) => {
+    const items = await listStaffCommands(req.query);
+    await recordAudit(req, { action: "staff.requests.list", resourceType: "command", metadata: { ...req.query, count: items.length } });
+    return { items };
+  });
+
+  app.post("/staff/requests/:id/:action", {
+    onRequest: [app.authenticate, app.requireRole("pharmacist", "admin")],
+    schema: {
+      tags: ["staff"],
+      summary: "Move a request: claim / release / done / reject",
+      params: z.object({ id: z.string().uuid(), action: z.enum(["claim", "release", "done", "reject"]) }),
+      body: z.object({ note: z.string().max(2000).optional() }).optional(),
+      response: { 200: z.object({ id: z.string().uuid(), status: z.enum(commandStatusEnum.enumValues) }) },
+    },
+  }, async (req) => {
+    const actor = req.user.email ?? req.user.firebaseUid;
+    const r = await transitionCommand({ id: req.params.id, action: req.params.action, actor, note: req.body?.note ?? null });
+    await recordAudit(req, {
+      action: `staff.requests.${req.params.action}`,
+      resourceType: "command",
+      resourceId: req.params.id,
+      metadata: { status: r.status, note: req.body?.note ?? null },
+    });
+    return r;
   });
 
   // ─── /admin — admin only ────────────────────────────────────────────────
