@@ -27,7 +27,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22.23.4'
           cache: 'npm'
 
       - name: Install dependencies
@@ -93,6 +93,10 @@ jobs:
           script: |
             set -e
             cd /opt/phcustomerapi
+            node_runtime=/opt/phcustomerapi/.node-runtime/node-v22.23.4-linux-x64/bin
+            test -x "$node_runtime/node"
+            export PATH="$node_runtime:$PATH"
+            test "$(node --version)" = "v22.23.4"
             sum=$(sha256sum package-lock.json | cut -d' ' -f1)
             if [ ! -f .deployed-lock-sha ] || [ "$(cat .deployed-lock-sha)" != "$sum" ]; then
               echo "lockfile changed — running npm ci"
